@@ -1,0 +1,20 @@
+{
+    "name": "ai.moholo.gaussiansplatting.Editor",
+    "rootNamespace": "GaussianSplatting.Editor",
+    "references": [
+        "Unity.RenderPipelines.Universal.Editor",
+        "ai.moholo.gaussiansplatting"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
+

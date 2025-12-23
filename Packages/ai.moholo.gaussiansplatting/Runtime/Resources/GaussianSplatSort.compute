@@ -1,0 +1,42 @@
+// DeviceRadixSort for Gaussian Splatting
+#define KEY_UINT
+#define PAYLOAD_UINT
+#define SORT_PAIRS
+
+#pragma kernel InitDeviceRadixSort
+#pragma kernel Upsweep
+#pragma kernel Scan
+#pragma kernel Downsweep
+#pragma kernel CSCalcDistances
+
+// GPU sorting needs wave ops
+#pragma require wavebasic
+#pragma require waveballot
+#pragma use_dxc
+
+#include "DeviceRadixSort.hlsl"
+
+// Gaussian Splatting specific buffers and uniforms
+StructuredBuffer<float3> _SplatPos;
+RWStructuredBuffer<uint> _SplatSortDistances;
+RWStructuredBuffer<uint> _SplatSortKeys;
+uint _SplatCount;
+float4x4 _MatrixMV;
+
+// Calculate distances kernel - converts splat positions to sortable distances
+[numthreads(256, 1, 1)]
+void CSCalcDistances(uint3 id : SV_DispatchThreadID)
+{
+    uint idx = id.x;
+    if (idx >= _SplatCount)
+        return;
+
+    uint origIdx = _SplatSortKeys[idx];
+
+    float3 pos = _SplatPos[origIdx];
+    pos = mul(_MatrixMV, float4(pos, 1)).xyz;
+
+    // Convert view-space Z to sortable uint for back-to-front rendering
+    // Negate Z to reverse sort order (far objects first, near objects last)
+    _SplatSortDistances[idx] = FloatToUint(-pos.z);
+}

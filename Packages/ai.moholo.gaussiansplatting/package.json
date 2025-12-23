@@ -1,0 +1,33 @@
+{
+  "name": "ai.moholo.gaussiansplatting",
+  "version": "1.0.0",
+  "displayName": "Gaussian Splatting",
+  "description": "Unity package for rendering Gaussian Splatting point clouds. Supports runtime PLY loading, GPU sorting, and full spherical harmonics rendering.",
+  "unity": "2021.3",
+  "unityRelease": "0f1",
+  "dependencies": {
+    "com.unity.render-pipelines.universal": "12.0.0"
+  },
+  "keywords": [
+    "gaussian",
+    "splatting",
+    "point-cloud",
+    "rendering",
+    "3d",
+    "neural",
+    "radiance-field"
+  ],
+  "author": {
+    "name": "Moholo",
+    "email": "",
+    "url": ""
+  },
+  "samples": [
+    {
+      "displayName": "Gaussian Splatting Demo",
+      "description": "Example scene and prefab demonstrating Gaussian Splatting rendering. Includes a sample scene with a configured GaussianSplatRenderer component.",
+      "path": "Samples~/Demo"
+    }
+  ]
+}
+

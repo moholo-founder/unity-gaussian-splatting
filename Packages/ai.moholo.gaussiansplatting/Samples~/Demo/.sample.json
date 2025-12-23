@@ -1,0 +1,6 @@
+{
+    "displayName": "Gaussian Splatting Demo",
+    "description": "Example scene and prefab demonstrating Gaussian Splatting rendering. Includes a sample scene with a configured GaussianSplatRenderer component.",
+    "createSeparatePackage": false
+}
+
