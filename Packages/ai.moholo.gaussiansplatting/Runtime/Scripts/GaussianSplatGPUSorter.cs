@@ -16,25 +16,32 @@ namespace GaussianSplatting
         private readonly int _scanKernel;
         private readonly int _downsweepKernel;
 
-        private GraphicsBuffer _sortDistances;      // b_sort - distances to sort
-        private GraphicsBuffer _sortDistancesAlt;   // b_alt - alternate buffer for ping-pong
-        private GraphicsBuffer _sortIndices;        // b_sortPayload - indices (payload)
-        private GraphicsBuffer _sortIndicesAlt;     // b_altPayload - alternate indices buffer
-        private GraphicsBuffer _globalHist;         // b_globalHist
-        private GraphicsBuffer _passHist;           // b_passHist
+        private GraphicsBuffer _sortDistances; // b_sort - distances to sort
+        private GraphicsBuffer _sortDistancesAlt; // b_alt - alternate buffer for ping-pong
+        private GraphicsBuffer _sortIndices; // b_sortPayload - indices (payload)
+        private GraphicsBuffer _sortIndicesAlt; // b_altPayload - alternate indices buffer
+        private GraphicsBuffer _globalHist; // b_globalHist
+        private GraphicsBuffer _passHist; // b_passHist
 
         private readonly int _splatCount;
-        private const int PartSize = 3840;
+        private readonly int _partSize;
         private const int Radix = 256;
 
         private Vector3 _lastCamPos;
         private Vector3 _lastCamDir;
         private const float Epsilon = 0.001f;
 
-        public GaussianSplatGPUSorter(ComputeShader sortShader, int splatCount)
+        private readonly bool _isMobile;
+        private readonly uint[] _identityIndices;
+
+        public GaussianSplatGPUSorter(ComputeShader sortShader, int splatCount, bool isMobile = false)
         {
             _sortShader = sortShader;
             _splatCount = splatCount;
+            _isMobile = isMobile;
+            
+            // Mobile version uses smaller partition size due to shared memory constraints
+            _partSize = isMobile ? 1024 : 3840;
 
             _calcDistancesKernel = _sortShader.FindKernel("CSCalcDistances");
             _initKernel = _sortShader.FindKernel("InitDeviceRadixSort");
@@ -42,19 +49,35 @@ namespace GaussianSplatting
             _scanKernel = _sortShader.FindKernel("Scan");
             _downsweepKernel = _sortShader.FindKernel("Downsweep");
 
-            // Calculate thread blocks
-            int threadBlocks = (splatCount + PartSize - 1) / PartSize;
+            int threadBlocks = (splatCount + _partSize - 1) / _partSize;
 
-            // Allocate buffers - indices need CopySource for final copy to output
             _sortDistances = new GraphicsBuffer(GraphicsBuffer.Target.Structured, splatCount, sizeof(uint));
             _sortDistancesAlt = new GraphicsBuffer(GraphicsBuffer.Target.Structured, splatCount, sizeof(uint));
             _sortIndices = new GraphicsBuffer(GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.CopySource, splatCount, sizeof(uint));
             _sortIndicesAlt = new GraphicsBuffer(GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.CopySource, splatCount, sizeof(uint));
-            _globalHist = new GraphicsBuffer(GraphicsBuffer.Target.Structured, Radix * 4, sizeof(uint)); // 4 passes for 32-bit
+            _globalHist = new GraphicsBuffer(GraphicsBuffer.Target.Structured, Radix * 4, sizeof(uint));  // 4 passes for 32-bit
             _passHist = new GraphicsBuffer(GraphicsBuffer.Target.Structured, Radix * threadBlocks, sizeof(uint));
+
+            _identityIndices = new uint[splatCount];
+            for (int i = 0; i < splatCount; i++)
+                _identityIndices[i] = (uint)i;
 
             _lastCamPos = new Vector3(float.NaN, 0, 0);
             _lastCamDir = new Vector3(float.NaN, 0, 0);
+        }
+
+        public static GaussianSplatGPUSorter Create(int splatCount, bool useMobile = false)
+        {
+            string shaderName = useMobile ? "GaussianSplatSortMobile" : "GaussianSplatSort";
+            
+            var sortShader = Resources.Load<ComputeShader>(shaderName);
+            if (sortShader == null)
+            {
+                Debug.LogWarning($"[GaussianSplatGPUSorter] Could not load {shaderName} compute shader from Resources.");
+                return null;
+            }
+            
+            return new GaussianSplatGPUSorter(sortShader, splatCount, useMobile);
         }
 
         public void Dispose()
@@ -92,19 +115,14 @@ namespace GaussianSplatting
             _lastCamPos = camPosOS;
             _lastCamDir = camDirOS;
 
-            int threadBlocks = (_splatCount + PartSize - 1) / PartSize;
+            int threadBlocks = (_splatCount + _partSize - 1) / _partSize;
 
-            // Set common shader parameters
             _sortShader.SetInt("e_numKeys", _splatCount);
             _sortShader.SetInt("e_threadBlocks", threadBlocks);
             _sortShader.SetMatrix("_MatrixMV", viewMatrix);
             _sortShader.SetInt("_SplatCount", _splatCount);
 
-            // Step 1: Initialize indices buffer with identity (0, 1, 2, ...)
-            uint[] identityIndices = new uint[_splatCount];
-            for (int i = 0; i < _splatCount; i++)
-                identityIndices[i] = (uint)i;
-            _sortIndices.SetData(identityIndices);
+            _sortIndices.SetData(_identityIndices);
 
             // Step 2: Calculate distances
             _sortShader.SetBuffer(_calcDistancesKernel, "_SplatPos", posBuffer);
@@ -123,9 +141,8 @@ namespace GaussianSplatting
             for (int pass = 0; pass < 4; pass++)
             {
                 _sortShader.SetInt("e_radixShift", pass * 8);
-
                 // Init: Clear global histogram
-                int initThreadGroups = (Radix * 4 + 1023) / 1024;
+                int initThreadGroups = (Radix * 4 + 255) / 256;
                 _sortShader.SetBuffer(_initKernel, "b_globalHist", _globalHist);
                 _sortShader.Dispatch(_initKernel, initThreadGroups, 1, 1);
 
@@ -136,8 +153,11 @@ namespace GaussianSplatting
                 _sortShader.Dispatch(_upsweepKernel, threadBlocks, 1, 1);
 
                 // Scan: Prefix sum over histograms
+                // Mobile version needs RADIX+1 groups (extra group for global histogram scan)
                 _sortShader.SetBuffer(_scanKernel, "b_passHist", _passHist);
-                _sortShader.Dispatch(_scanKernel, Radix, 1, 1);
+                _sortShader.SetBuffer(_scanKernel, "b_globalHist", _globalHist);
+                int scanGroups = _isMobile ? Radix + 1 : Radix;
+                _sortShader.Dispatch(_scanKernel, scanGroups, 1, 1);
 
                 // Downsweep: Scatter keys to sorted positions
                 _sortShader.SetBuffer(_downsweepKernel, "b_sort", currentDistances);
