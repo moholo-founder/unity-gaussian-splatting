@@ -1,101 +1,141 @@
 using System.Collections;
 using System.IO;
+using System.Text;
 using UnityEngine;
 using UnityEngine.Networking;
 
 namespace GaussianSplatting
 {
     /// <summary>
-    /// Loads PLY files at runtime from StreamingAssets using UnityWebRequest.
+    /// Loads PLY files at runtime from StreamingAssets or URL using UnityWebRequest.
     /// This is necessary for Android builds where direct file access is not available.
     /// </summary>
     [ExecuteAlways]
     public class RuntimePlyLoader : MonoBehaviour
     {
-        [Header("PLY File Settings")]
-        [Tooltip("Name of the PLY file in StreamingAssets/GaussianSplatting/ folder (e.g., 'testsplat.ply')")]
-        public string plyFileName = "testsplat.ply";
+#if UNITY_EDITOR
+        [Tooltip("Drag a PLY file here to automatically copy it to StreamingAssets/GaussianSplatting and set it as the source")]
+        [SerializeField] private UnityEngine.Object _plyAsset;
+#endif
+        
+        [Tooltip("URL or filename to load. URLs start with http:// or https://. Filenames are loaded from StreamingAssets/GaussianSplatting/ folder.")]
+        [SerializeField] private string _plySource = "testsplat.ply";
 
-        [Header("Auto-Load Settings")]
         [Tooltip("Automatically load the PLY file on Start")]
-        public bool loadOnStart = true;
+        [SerializeField] private bool _loadOnStart = true;
 
-        [Header("Target Renderer")]
-        [Tooltip("Optional: GaussianSplatRenderer to automatically assign the loaded asset to")]
-        public GaussianSplatRenderer targetRenderer;
+        [Tooltip("GaussianSplatRenderer to assign the loaded data to")]
+        [SerializeField] private GaussianSplatRenderer _targetRenderer;
 
-        [Header("Status")]
-        [SerializeField]
+        [SerializeField, HideInInspector] private bool _hadLoadedData = false;
+
         private bool _isLoading = false;
-        [SerializeField]
         private bool _isLoaded = false;
-        [SerializeField]
         private string _loadError = "";
 
-        private GaussianSplatAsset _loadedAsset;
+        private GaussianSplatData _loadedData;
+        private string _lastLoadedSource = "";
 
         public bool IsLoading => _isLoading;
         public bool IsLoaded => _isLoaded;
         public string LoadError => _loadError;
-        public GaussianSplatAsset LoadedAsset => _loadedAsset;
+        public GaussianSplatData LoadedData => _loadedData;
 
         void Start()
         {
-            if (loadOnStart && Application.isPlaying)
+            if (_loadOnStart && Application.isPlaying)
             {
-                LoadPlyFile();
+                LoadPly();
             }
+        }
+        
+        private bool IsUrl(string source)
+        {
+            if (string.IsNullOrEmpty(source)) return false;
+            return source.StartsWith("http://") || source.StartsWith("https://");
         }
 
         /// <summary>
-        /// Load the PLY file specified in plyFileName.
+        /// Load the PLY from the current PlySource
         /// </summary>
-        public void LoadPlyFile()
+        public void LoadPly()
         {
-            if (string.IsNullOrEmpty(plyFileName))
+            if (string.IsNullOrEmpty(_plySource))
             {
-                Debug.LogError("[RuntimePlyLoader] PLY file name is empty.");
-                _loadError = "PLY file name is empty";
+                Debug.LogError("[RuntimePlyLoader] PlySource is empty.");
+                _loadError = "PlySource is empty";
                 return;
             }
 
-            StartCoroutine(LoadPlyFileCoroutine());
+            StartCoroutine(LoadPlyCoroutine());
         }
 
         /// <summary>
-        /// Load a specific PLY file by name.
+        /// Load a PLY from a specific URL or filename
         /// </summary>
-        public void LoadPlyFile(string fileName)
+        public void LoadPly(string urlOrFileName)
         {
-            plyFileName = fileName;
-            LoadPlyFile();
+            _plySource = urlOrFileName;
+            LoadPly();
         }
 
-        private IEnumerator LoadPlyFileCoroutine()
+        [ContextMenu("Force Reload")]
+        public void ForceReload()
+        {
+            _lastLoadedSource = "";
+            _loadedData = null;
+            _isLoaded = false;
+            LoadPly();
+        }
+
+        private IEnumerator LoadPlyCoroutine()
         {
             _isLoading = true;
             _isLoaded = false;
             _loadError = "";
 
-            // StreamingAssets path for Gaussian Splatting
-            string filePath = Path.Combine(Application.streamingAssetsPath, "GaussianSplatting", plyFileName);
-            Debug.Log($"[RuntimePlyLoader] Loading PLY from: {filePath}");
+            bool isUrl = IsUrl(_plySource);
+            string loadPath;
+
+            if (isUrl)
+            {
+                // Load directly from URL
+                loadPath = _plySource;
+                string urlExtension = Path.GetExtension(loadPath).ToLower();
+                if (!string.IsNullOrEmpty(urlExtension) && urlExtension != ".ply")
+                {
+                    Debug.LogWarning($"[RuntimePlyLoader] URL has extension '{urlExtension}' but expected '.ply'.");
+                }
+            }
+            else
+            {
+                // Load from StreamingAssets/GaussianSplatting/ folder
+                loadPath = Path.Combine(Application.streamingAssetsPath, "GaussianSplatting", _plySource);
+            }
 
             byte[] fileBytes = null;
 
-            // For Android, iOS, and WebGL, StreamingAssets path contains "://" 
-            // and requires UnityWebRequest
-            if (filePath.Contains("://") || Application.platform == RuntimePlatform.Android)
+            // Determine if we need to use UnityWebRequest
+            bool useWebRequest = isUrl || loadPath.Contains("://") || Application.platform == RuntimePlatform.Android;
+            
+            // For local file paths on Android, prepend file:// for UnityWebRequest
+            string requestUrl = loadPath;
+            if (useWebRequest && !isUrl && !loadPath.Contains("://"))
             {
-                using (UnityWebRequest uwr = UnityWebRequest.Get(filePath))
+                requestUrl = "file://" + loadPath;
+            }
+
+            if (useWebRequest)
+            {
+                using (UnityWebRequest uwr = UnityWebRequest.Get(requestUrl))
                 {
                     yield return uwr.SendWebRequest();
 
-                    if (uwr.result == UnityWebRequest.Result.ConnectionError || 
+                    if (uwr.result == UnityWebRequest.Result.ConnectionError ||
                         uwr.result == UnityWebRequest.Result.ProtocolError)
                     {
-                        _loadError = $"Error loading PLY file: {uwr.error}";
-                        Debug.LogError($"[RuntimePlyLoader] {_loadError}");
+                        _loadError = $"Error loading PLY: {uwr.error}";
+                        Debug.LogError($"[RuntimePlyLoader] {_loadError} URL: {requestUrl}");
                         _isLoading = false;
                         yield break;
                     }
@@ -106,9 +146,9 @@ namespace GaussianSplatting
             else
             {
                 // For Editor and Standalone builds on desktop platforms
-                if (!File.Exists(filePath))
+                if (!File.Exists(loadPath))
                 {
-                    _loadError = $"PLY file not found: {filePath}";
+                    _loadError = $"PLY file not found: {loadPath}";
                     Debug.LogError($"[RuntimePlyLoader] {_loadError}");
                     _isLoading = false;
                     yield break;
@@ -116,7 +156,7 @@ namespace GaussianSplatting
 
                 try
                 {
-                    fileBytes = File.ReadAllBytes(filePath);
+                    fileBytes = File.ReadAllBytes(loadPath);
                 }
                 catch (System.Exception ex)
                 {
@@ -127,6 +167,7 @@ namespace GaussianSplatting
                 }
             }
 
+            // Validate file content
             if (fileBytes == null || fileBytes.Length == 0)
             {
                 _loadError = "PLY file is empty";
@@ -135,12 +176,28 @@ namespace GaussianSplatting
                 yield break;
             }
 
-            Debug.Log($"[RuntimePlyLoader] Loaded {fileBytes.Length} bytes, parsing PLY data...");
+            if (fileBytes.Length < 3)
+            {
+                _loadError = "File is too small to be a valid PLY file";
+                Debug.LogError($"[RuntimePlyLoader] {_loadError}");
+                _isLoading = false;
+                yield break;
+            }
+
+            // Check PLY header magic bytes (PLY files start with "ply")
+            string headerStart = Encoding.ASCII.GetString(fileBytes, 0, System.Math.Min(3, fileBytes.Length));
+            if (!headerStart.Equals("ply", System.StringComparison.OrdinalIgnoreCase))
+            {
+                _loadError = "File is not a PLY file (missing 'ply' header)";
+                Debug.LogError($"[RuntimePlyLoader] {_loadError}");
+                _isLoading = false;
+                yield break;
+            }
 
             // Parse PLY data on a separate frame to avoid blocking
             yield return null;
 
-            PlyGaussianSplat plyData = null;
+            GaussianSplatData plyData = null;
             try
             {
                 // Always use RightHandedToUnity conversion
@@ -162,53 +219,196 @@ namespace GaussianSplatting
                 yield break;
             }
 
-            Debug.Log($"[RuntimePlyLoader] Parsed {plyData.Count} splats, creating asset...");
+            Debug.Log($"[RuntimePlyLoader] Parsed {plyData.Count} splats from '{_plySource}'");
 
-            // Create runtime asset
-            _loadedAsset = ScriptableObject.CreateInstance<GaussianSplatAsset>();
-            _loadedAsset.name = Path.GetFileNameWithoutExtension(plyFileName);
-            _loadedAsset.Count = plyData.Count;
-            _loadedAsset.Centers = plyData.Centers;
-            _loadedAsset.Rotations = plyData.Rotations;
-            _loadedAsset.Scales = plyData.Scales;
-            _loadedAsset.Colors = plyData.Colors;
-            _loadedAsset.ShBands = plyData.ShBands;
-            _loadedAsset.ShCoeffsPerSplat = plyData.ShCoeffsPerSplat;
-            _loadedAsset.ShCoeffs = plyData.ShCoeffs;
-
+            _loadedData = plyData;
+            _lastLoadedSource = _plySource;
             _isLoaded = true;
             _isLoading = false;
+            _hadLoadedData = true;
 
-            Debug.Log($"[RuntimePlyLoader] Successfully loaded '{plyFileName}' with {plyData.Count} splats");
+            Debug.Log($"[RuntimePlyLoader] Successfully loaded '{_plySource}' with {plyData.Count} splats");
 
             // Auto-assign to target renderer if specified
-            if (targetRenderer != null)
+            if (_targetRenderer != null)
             {
-                Debug.Log($"[RuntimePlyLoader] Assigning asset to renderer");
-                targetRenderer.PlyAsset = _loadedAsset;
-            }
-        }
-
-        private void OnDestroy()
-        {
-            // Clean up runtime-created asset
-            if (_loadedAsset != null && Application.isPlaying)
-            {
-                Destroy(_loadedAsset);
-                _loadedAsset = null;
+                _targetRenderer.SetSplatData(_loadedData);
             }
         }
 
 #if UNITY_EDITOR
         private void OnValidate()
         {
-            // In editor, auto-find renderer if not set
-            if (targetRenderer == null)
+            if (_targetRenderer == null)
             {
-                targetRenderer = GetComponent<GaussianSplatRenderer>();
+                _targetRenderer = GetComponent<GaussianSplatRenderer>();
+            }
+
+            if (!Application.isPlaying && _hadLoadedData && _loadedData == null && !_isLoading)
+            {
+                UnityEditor.EditorApplication.delayCall += () =>
+                {
+                    if (this != null && !_isLoading)
+                        LoadPly();
+                };
             }
         }
 #endif
     }
-}
 
+#if UNITY_EDITOR
+    [UnityEditor.CustomEditor(typeof(RuntimePlyLoader))]
+    public class RuntimePlyLoaderEditor : UnityEditor.Editor
+    {
+        private bool _wasLoading = false;
+        private UnityEditor.SerializedProperty _plyAssetProp;
+        private UnityEditor.SerializedProperty _plySourceProp;
+
+        private void OnEnable()
+        {
+            _wasLoading = false;
+            _plyAssetProp = serializedObject.FindProperty("_plyAsset");
+            _plySourceProp = serializedObject.FindProperty("_plySource");
+        }
+
+        public override void OnInspectorGUI()
+        {
+            serializedObject.Update();
+            
+            RuntimePlyLoader loader = (RuntimePlyLoader)target;
+
+            UnityEditor.EditorGUI.BeginChangeCheck();
+            UnityEditor.EditorGUILayout.PropertyField(_plyAssetProp, new GUIContent("PLY Asset", "Drag a PLY file here to copy to StreamingAssets"));
+            if (UnityEditor.EditorGUI.EndChangeCheck() && _plyAssetProp.objectReferenceValue != null)
+            {
+                HandlePlyAssetAssigned(_plyAssetProp.objectReferenceValue, loader);
+                _plyAssetProp.objectReferenceValue = null;
+            }
+
+            UnityEditor.EditorGUILayout.PropertyField(_plySourceProp);
+            
+            var iterator = serializedObject.GetIterator();
+            iterator.NextVisible(true);
+            while (iterator.NextVisible(false))
+            {
+                if (iterator.name == "_plyAsset" || iterator.name == "_plySource") continue;
+                UnityEditor.EditorGUILayout.PropertyField(iterator, true);
+            }
+            
+            serializedObject.ApplyModifiedProperties();
+
+            UnityEditor.EditorGUILayout.Space();
+            
+            if (GUILayout.Button("Load Splat"))
+            {
+                loader.LoadPly();
+            }
+
+            UnityEditor.EditorGUILayout.Space();
+            UnityEditor.EditorGUILayout.LabelField("Status", UnityEditor.EditorStyles.boldLabel);
+
+            if (loader.IsLoading)
+            {
+                UnityEditor.EditorGUILayout.HelpBox("Loading...", UnityEditor.MessageType.Info);
+                if (!_wasLoading)
+                {
+                    UnityEditor.EditorApplication.update += Repaint;
+                    _wasLoading = true;
+                }
+            }
+            else
+            {
+                if (_wasLoading)
+                {
+                    UnityEditor.EditorApplication.update -= Repaint;
+                    _wasLoading = false;
+                }
+
+                if (!string.IsNullOrEmpty(loader.LoadError))
+                {
+                    UnityEditor.EditorGUILayout.HelpBox($"Error: {loader.LoadError}", UnityEditor.MessageType.Error);
+                }
+                else if (loader.IsLoaded && loader.LoadedData != null)
+                {
+                    UnityEditor.EditorGUILayout.HelpBox($"Loaded: {loader.LoadedData.Count} splats", UnityEditor.MessageType.Info);
+                }
+                else
+                {
+                    UnityEditor.EditorGUILayout.HelpBox("Not loaded", UnityEditor.MessageType.None);
+                }
+            }
+        }
+
+        private void HandlePlyAssetAssigned(UnityEngine.Object asset, RuntimePlyLoader loader)
+        {
+            string assetPath = UnityEditor.AssetDatabase.GetAssetPath(asset);
+            if (string.IsNullOrEmpty(assetPath))
+            {
+                Debug.LogWarning("[RuntimePlyLoader] Could not get asset path");
+                return;
+            }
+
+            if (!assetPath.ToLower().EndsWith(".ply"))
+            {
+                Debug.LogWarning("[RuntimePlyLoader] Asset is not a PLY file");
+                return;
+            }
+
+            string fileName = Path.GetFileName(assetPath);
+            string streamingAssetsFolder = Path.Combine(Application.streamingAssetsPath, "GaussianSplatting");
+            string targetPath = Path.Combine(streamingAssetsFolder, fileName);
+
+            string normalizedAssetPath = assetPath.Replace("\\", "/");
+            string normalizedTargetPath = targetPath.Replace("\\", "/");
+            string streamingAssetsRelative = "Assets/StreamingAssets/GaussianSplatting/";
+
+            bool alreadyInStreamingAssets = normalizedAssetPath.StartsWith(streamingAssetsRelative, System.StringComparison.OrdinalIgnoreCase);
+
+            if (!alreadyInStreamingAssets)
+            {
+                if (!Directory.Exists(streamingAssetsFolder))
+                {
+                    Directory.CreateDirectory(streamingAssetsFolder);
+                    UnityEditor.AssetDatabase.Refresh();
+                }
+
+                string sourcePath = Path.GetFullPath(assetPath);
+                
+                if (File.Exists(targetPath))
+                {
+                    Debug.Log($"[RuntimePlyLoader] PLY file already exists in StreamingAssets: {fileName}");
+                }
+                else
+                {
+                    File.Copy(sourcePath, targetPath);
+                    UnityEditor.AssetDatabase.Refresh();
+                    Debug.Log($"[RuntimePlyLoader] Copied PLY file to StreamingAssets: {fileName}");
+                }
+            }
+
+            _plySourceProp.stringValue = fileName;
+            serializedObject.ApplyModifiedProperties();
+
+            string gameObjectName = Path.GetFileNameWithoutExtension(fileName);
+            UnityEditor.Undo.RecordObject(loader.gameObject, "Rename to PLY filename");
+            loader.gameObject.name = gameObjectName;
+
+            Debug.Log($"[RuntimePlyLoader] Set PLY source to '{fileName}' and renamed GameObject to '{gameObjectName}'");
+
+            if (!Application.isPlaying)
+            {
+                UnityEditor.EditorApplication.delayCall += () =>
+                {
+                    if (loader != null)
+                        loader.LoadPly();
+                };
+            }
+        }
+
+        private void OnDisable()
+        {
+            UnityEditor.EditorApplication.update -= Repaint;
+        }
+    }
+#endif
+}
