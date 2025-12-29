@@ -19,14 +19,21 @@ Shader "GaussianSplatting/Gaussian Splat"
             Blend One OneMinusSrcAlpha
 
             HLSLPROGRAM
-            #pragma target 4.5
+            #pragma target 3.5
+            #pragma exclude_renderers d3d11_9x
             #pragma vertex Vert
             #pragma fragment Frag
+            #pragma multi_compile_instancing
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 
             struct Attributes { uint vertexID : SV_VertexID; };
-            struct Varyings { float4 positionCS : SV_POSITION; float2 gaussianUV : TEXCOORD0; float4 gaussianColor : TEXCOORD1; };
+            struct Varyings 
+            { 
+                float4 positionCS : SV_POSITION; 
+                float2 gaussianUV : TEXCOORD0; 
+                float4 gaussianColor : TEXCOORD1; 
+            };
 
             StructuredBuffer<uint> _SplatOrder;
             StructuredBuffer<float3> _Centers;
@@ -45,20 +52,32 @@ Shader "GaussianSplatting/Gaussian Splat"
             float _CamProjM00;
             float _CamProjM11;
 
+            Varyings MakeInvalidVaryings()
+            {
+                Varyings o;
+                o.positionCS = float4(0, 0, 0, 0);
+                o.gaussianUV = float2(0, 0);
+                o.gaussianColor = float4(0, 0, 0, 0);
+                return o;
+            }
+
             float3x3 QuatToMat3(float4 q)
             {
                 float w = q.x, x = q.y, y = q.z, z = q.w;
-                return float3x3(
-                    1.0-2.0*(y*y+z*z), 2.0*(x*y-w*z), 2.0*(x*z+w*y),
-                    2.0*(x*y+w*z), 1.0-2.0*(x*x+z*z), 2.0*(y*z-w*x),
-                    2.0*(x*z-w*y), 2.0*(y*z+w*x), 1.0-2.0*(x*x+y*y)
-                );
+                float3x3 m;
+                m[0] = float3(1.0-2.0*(y*y+z*z), 2.0*(x*y-w*z), 2.0*(x*z+w*y));
+                m[1] = float3(2.0*(x*y+w*z), 1.0-2.0*(x*x+z*z), 2.0*(y*z-w*x));
+                m[2] = float3(2.0*(x*z-w*y), 2.0*(y*z+w*x), 1.0-2.0*(x*x+y*y));
+                return m;
             }
 
             void ComputeCovariance(float4 q, float3 s, out float3 covA, out float3 covB)
             {
                 float3x3 R = QuatToMat3(normalize(q));
-                float3x3 S = float3x3(s.x,0,0, 0,s.y,0, 0,0,s.z);
+                float3x3 S;
+                S[0] = float3(s.x, 0, 0);
+                S[1] = float3(0, s.y, 0);
+                S[2] = float3(0, 0, s.z);
                 float3x3 M = mul(R, S);
                 float3x3 V = mul(M, transpose(M));
                 covA = float3(V[0][0], V[0][1], V[0][2]);
@@ -67,9 +86,19 @@ Shader "GaussianSplatting/Gaussian Splat"
 
             bool InitCornerCov(float2 cornerUV, float3 viewPos, float4 centerCS, float proj00, float proj11, float3 covA, float3 covB, out float2 offsetCS, out float2 outUV)
             {
-                float3x3 Vrk = float3x3(covA.x, covA.y, covA.z, covA.y, covB.x, covB.y, covA.z, covB.y, covB.z);
+                offsetCS = float2(0, 0);
+                outUV = float2(0, 0);
+
+                float3x3 Vrk;
+                Vrk[0] = float3(covA.x, covA.y, covA.z);
+                Vrk[1] = float3(covA.y, covB.x, covB.y);
+                Vrk[2] = float3(covA.z, covB.y, covB.z);
+
                 float4x4 modelView = mul(UNITY_MATRIX_V, _SplatObjectToWorld);
-                float3x3 W = (float3x3)modelView;
+                float3x3 W;
+                W[0] = modelView[0].xyz;
+                W[1] = modelView[1].xyz;
+                W[2] = modelView[2].xyz;
                 
                 // Use camera's raw projection for focal length (not GPU-adjusted)
                 // If _CamProjM00/_CamProjM11 are set, use them; otherwise fall back to passed values
@@ -80,16 +109,14 @@ Shader "GaussianSplatting/Gaussian Splat"
                 
                 // Unity view space has negative Z for objects in front - convert to positive depth
                 float z = -viewPos.z;
-                if (z <= 0.001) return false; // Behind or at camera plane
+                if (z <= 0.001) return false;
                 float invZ = 1.0 / z;
                 float invZ2 = invZ * invZ;
 
-                // Jacobian for perspective projection
-                float3x3 J = float3x3(
-                    focalX*invZ, 0, focalX*viewPos.x*invZ2,
-                    0, focalY*invZ, focalY*viewPos.y*invZ2,
-                    0, 0, 0
-                );
+                float3x3 J;
+                J[0] = float3(focalX*invZ, 0, focalX*viewPos.x*invZ2);
+                J[1] = float3(0, focalY*invZ, focalY*viewPos.y*invZ2);
+                J[2] = float3(0, 0, 0);
 
                 // cov2d = J * W * Vrk * W^T * J^T = T * Vrk * T^T where T = J * W
                 float3x3 T = mul(J, W);
@@ -103,7 +130,6 @@ Shader "GaussianSplatting/Gaussian Splat"
                 float mid = 0.5 * (cov2d[0][0] + cov2d[1][1]);
                 float lambda1 = mid + sqrt(max(0.1, mid * mid - det));
                 float lambda2 = max(0.1, mid - sqrt(max(0.1, mid * mid - det)));
-                float radius = ceil(3.0 * sqrt(lambda1));
                 
                 float2 diag = normalize(float2(cov2d[0][1], lambda1 - cov2d[0][0]));
                 if (abs(cov2d[0][1]) < 1e-4) diag = float2(1, 0);
@@ -135,7 +161,7 @@ Shader "GaussianSplatting/Gaussian Splat"
 
             float3 EvalSH(uint id, float3 dir)
             {
-                if (_SHBands <= 0) return 0;
+                if (_SHBands <= 0) return float3(0, 0, 0);
                 uint b = id * (uint)_SHCoeffsPerSplat;
                 float x=dir.x, y=dir.y, z=dir.z;
                 float3 res = SH_C1 * (-_SHCoeffs[b+0]*y + _SHCoeffs[b+1]*z - _SHCoeffs[b+2]*x);
@@ -149,14 +175,14 @@ Shader "GaussianSplatting/Gaussian Splat"
                 return res;
             }
 
-            float NormExp(float x) { return exp(-0.5 * x); }
-
             Varyings Vert(Attributes IN)
             {
-                Varyings OUT;
+                Varyings OUT = MakeInvalidVaryings();
+                
                 uint idx = IN.vertexID / 6u;
                 uint vidx = IN.vertexID % 6u;
-                if (idx >= _NumSplats) { OUT.positionCS = 0; return OUT; }
+                if (idx >= _NumSplats) return OUT;
+                
                 float2 uv = float2(vidx==1||vidx==2||vidx==4?1:-1, vidx==2||vidx==4||vidx==5?1:-1);
                 uint id = _SplatOrder[idx];
                 float3 p = _Centers[id];
@@ -168,18 +194,25 @@ Shader "GaussianSplatting/Gaussian Splat"
                 float4 cp = mul(UNITY_MATRIX_P, float4(vp, 1.0));
                 
                 float3 ca, cb;
-                // Use default quaternion interpretation: q = (w, x, y, z)
                 float4 q = float4(r.w, r.x, r.y, r.z);
                 ComputeCovariance(q, s, ca, cb);
-                float2 off; float2 guv;
-                if (!InitCornerCov(uv, vp, cp, UNITY_MATRIX_P[0][0], UNITY_MATRIX_P[1][1], ca, cb, off, guv)) { OUT.positionCS=0; return OUT; }
+                
+                float2 off, guv;
+                float p00 = UNITY_MATRIX_P[0][0];
+                float p11 = UNITY_MATRIX_P[1][1];
+                if (!InitCornerCov(uv, vp, cp, p00, p11, ca, cb, off, guv)) return OUT;
+                
                 OUT.positionCS = cp + float4(off, 0, 0);
                 OUT.gaussianUV = guv;
-                if (_SHBands>0) {
+                if (_SHBands > 0) {
                     float3 dir = normalize(wp - _WorldSpaceCameraPos);
-                    c.rgb += EvalSH(id, mul((float3x3)_SplatWorldToObject, dir));
+                    float3x3 wtol;
+                    wtol[0] = _SplatWorldToObject[0].xyz;
+                    wtol[1] = _SplatWorldToObject[1].xyz;
+                    wtol[2] = _SplatWorldToObject[2].xyz;
+                    c.rgb += EvalSH(id, mul(wtol, dir));
                 }
-                OUT.gaussianColor = float4(max(c.rgb, 0), c.a);
+                OUT.gaussianColor = float4(max(c.rgb, float3(0, 0, 0)), c.a);
                 return OUT;
             }
 
@@ -194,4 +227,6 @@ Shader "GaussianSplatting/Gaussian Splat"
             ENDHLSL
         }
     }
+    
+    Fallback Off
 }

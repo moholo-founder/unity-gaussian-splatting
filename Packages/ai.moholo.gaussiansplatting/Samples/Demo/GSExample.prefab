@@ -9,6 +9,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 2305386197343695992}
+  - component: {fileID: 4084549944957908433}
   - component: {fileID: 8493995070576340840}
   - component: {fileID: 1516018672048090526}
   m_Layer: 0
@@ -33,6 +34,23 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &4084549944957908433
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7621731109524347326}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: da3d25f39d46c57488b4a5e7eeab482b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: ai.moholo.gaussiansplatting::GaussianSplatting.RuntimePlyLoader
+  _plyAsset: {fileID: 0}
+  _plySource: testsplat.ply
+  _loadOnStart: 1
+  _targetRenderer: {fileID: 8493995070576340840}
+  _hadLoadedData: 0
 --- !u!114 &8493995070576340840
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -45,14 +63,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b2b9050f92109224991332d73c0048bb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: ai.moholo.gaussiansplatting::GaussianSplatting.GaussianSplatRenderer
-  PlyUrl: https://storage.googleapis.com/toykind-public/resources/gaussian_8a125a88-2db2-4970-a523-c3ecf4b8b39f.ply
-  PlyFileName: testsplat.ply
   Material: {fileID: 2100000, guid: 05a667fb14e1e4a40800cef36518b4c2, type: 2}
   TargetCamera: {fileID: 0}
   SortEveryNFrames: 1
-  UseRenderFeature: 1
+  UseRenderFeature: 0
   ScaleMultiplier: 1
   MaxSplatsToLoad: 0
+  _forceMobileGPUSorting: 0
+  _forceCPUSorting: 0
 --- !u!114 &1516018672048090526
 MonoBehaviour:
   m_ObjectHideFlags: 0

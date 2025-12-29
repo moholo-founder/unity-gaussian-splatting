@@ -20,20 +20,6 @@ namespace GaussianSplatting
         ZUpRightHandedToUnity
     }
 
-    public sealed class PlyGaussianSplat
-    {
-        public int Count;
-        public Vector3[] Centers = Array.Empty<Vector3>();
-        public Vector4[] Rotations = Array.Empty<Vector4>(); // (x,y,z,w)
-        public Vector3[] Scales = Array.Empty<Vector3>();    // exp() already applied
-        public Vector4[] Colors = Array.Empty<Vector4>();    // rgb in [0..1], a in [0..1]
-
-        // Optional SH (not yet wired into the shader in this minimal Unity port)
-        public int ShBands; // 0..3
-        public int ShCoeffsPerSplat;              // 0, 3, 8, 15
-        public Vector3[] ShCoeffs = Array.Empty<Vector3>(); // length = Count * ShCoeffsPerSplat
-    }
-
     /// <summary>
     /// Minimal PLY loader for gaussian splat PLYs that include:
     /// x,y,z, rot_0..3, scale_0..2, f_dc_0..2, opacity, optional f_rest_*
@@ -62,7 +48,7 @@ namespace GaussianSplatting
             public readonly List<PropertySpec> Props = new List<PropertySpec>();
         }
 
-        public static PlyGaussianSplat Load(TextAsset plyTextAsset, CoordinateConversion conversion = CoordinateConversion.RightHandedToUnity)
+        public static GaussianSplatData Load(TextAsset plyTextAsset, CoordinateConversion conversion = CoordinateConversion.RightHandedToUnity)
         {
             if (plyTextAsset == null) throw new ArgumentNullException(nameof(plyTextAsset));
 
@@ -74,7 +60,7 @@ namespace GaussianSplatting
             return Load(bytes, conversion);
         }
 
-        public static PlyGaussianSplat Load(byte[] plyBytes, CoordinateConversion conversion = CoordinateConversion.RightHandedToUnity)
+        public static GaussianSplatData Load(byte[] plyBytes, CoordinateConversion conversion = CoordinateConversion.RightHandedToUnity)
         {
             if (plyBytes == null) throw new ArgumentNullException(nameof(plyBytes));
             if (plyBytes.Length == 0) throw new InvalidDataException("PLY data has no bytes.");
@@ -185,7 +171,7 @@ namespace GaussianSplatting
                 });
             }
 
-            return new PlyGaussianSplat
+            return new GaussianSplatData
             {
                 Count = count,
                 Centers = centers,
