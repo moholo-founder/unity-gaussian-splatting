@@ -186,6 +186,7 @@ namespace GaussianSplatting
         private Material _activeMaterial; // The material currently in use (either Material or MaterialGLES)
         private bool _isUsingGLES; // Track if we're using GLES path
         private bool _useMobilePath; // Track if we should use mobile-optimized path (packed buffers, GLES sorters)
+        private bool _lastUseMobilePath; // Track last path to detect changes
         
         [System.NonSerialized]
         private bool _needsReload = false; // Set to true after deserialization to force buffer reload
@@ -369,44 +370,33 @@ namespace GaussianSplatting
                 return;
             }
 
-            // Determine if we need GLES path
-            _isUsingGLES = SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.OpenGLES3 ||
-                           SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.OpenGLES2;
+            // FORCE GLES 3.1 PATH FOR ALL PLATFORMS
+            _isUsingGLES = true; 
+            _useMobilePath = true;
             
-            // Use mobile path (packed buffers, GLES sorters) if on GLES, mobile platform, or wave intrinsics missing
-            _useMobilePath = _isUsingGLES || Application.isMobilePlatform || !SystemInfo.supportsComputeShaders;
-            
-            // Select appropriate material
-            if (_isUsingGLES)
+            // Try to use GLES material
+            if (MaterialGLES == null)
             {
-                // Try to use GLES material, or create one if not provided
-                if (MaterialGLES == null)
+                var glesShader = Shader.Find("GaussianSplatting/Gaussian Splat GLES");
+                if (glesShader != null)
                 {
-                    var glesShader = Shader.Find("GaussianSplatting/Gaussian Splat GLES");
-                    if (glesShader != null)
-                    {
-                        MaterialGLES = new Material(glesShader);
-                        MaterialGLES.name = "GaussianSplatGLES (Auto)";
-                        Debug.Log("[GaussianSplatRenderer] Auto-created GLES material");
-                    }
-                    else
-                    {
-                        Debug.LogWarning("[GaussianSplatRenderer] Could not find GLES shader, falling back to standard shader");
-                        _isUsingGLES = false;
-                    }
+                    MaterialGLES = new Material(glesShader);
+                    MaterialGLES.name = "GaussianSplatGLES (Auto)";
+                    Debug.Log("[GaussianSplatRenderer] Auto-created GLES material");
                 }
-                _activeMaterial = _isUsingGLES ? MaterialGLES : Material;
+                else
+                {
+                    Debug.LogError("[GaussianSplatRenderer] Could not find GLES shader! Rendering will fail.");
+                }
             }
-            else
-            {
-                _activeMaterial = Material;
-            }
+            _activeMaterial = MaterialGLES;
             
-            Debug.Log($"[GaussianSplatRenderer] Using {(_isUsingGLES ? "GLES" : "standard")} material: {_activeMaterial?.name}");
+            Debug.Log($"[GaussianSplatRenderer] FORCED GLES 3.1 PATH (API: {SystemInfo.graphicsDeviceType})");
 
             // Force reload if deserialization occurred (e.g., after scene save/load)
-            // or if buffers don't exist or asset changed
-            bool needsReload = _needsReload || _order == null || _loadedAsset != PlyAsset || _count == 0;
+            // or if buffers don't exist, asset changed, or graphics path changed
+            bool pathChanged = _useMobilePath != _lastUseMobilePath;
+            bool needsReload = _needsReload || _order == null || _loadedAsset != PlyAsset || _count == 0 || pathChanged;
             
             if (!needsReload)
             {
@@ -416,6 +406,7 @@ namespace GaussianSplatting
 
             Debug.Log($"[GaussianSplatRenderer] TryLoad: loading {PlyAsset.name} to GPU ({PlyAsset.Count} splats)");
             _needsReload = false; // Clear the flag
+            _lastUseMobilePath = _useMobilePath; // Save current path
             Release();
             _loadedAsset = PlyAsset;
 
@@ -543,54 +534,38 @@ namespace GaussianSplatting
             _localBounds = ComputeLocalBounds(_centersCpu);
             _worldBounds = TransformBounds(_localBounds, transform.localToWorldMatrix);
 
-            // Create GPU sorter - choose based on graphics API capability
-            if (_useMobilePath)
+            // Create GPU sorter - FORCE MOBILE SORTERS (Bitonic/Radix GLES)
+            if (GLESSortAlgorithm == SortAlgorithm.None)
             {
-                if (GLESSortAlgorithm == SortAlgorithm.None)
-                {
-                    Debug.Log($"[GaussianSplatRenderer] Sorting DISABLED - fastest but may have visual artifacts (Graphics API: {SystemInfo.graphicsDeviceType})");
-                    // No sorter needed, identity order will be used
-                }
-                else if (GLESSortAlgorithm == SortAlgorithm.Bitonic)
-                {
-                    var sortShaderBitonic = Resources.Load<ComputeShader>("GaussianSplatBitonicSort");
-                    if (sortShaderBitonic != null)
-                    {
-                        _gpuSorterBitonic = new GaussianSplatBitonicSorter(sortShaderBitonic, _count);
-                        Debug.Log($"[GaussianSplatRenderer] Using BITONIC sort (Graphics API: {SystemInfo.graphicsDeviceType})");
-                    }
-                    else
-                    {
-                        Debug.LogWarning("[GaussianSplatRenderer] Could not load GaussianSplatBitonicSort compute shader. Falling back to radix sort.");
-                        GLESSortAlgorithm = SortAlgorithm.Radix;
-                    }
-                }
-                
-                if (GLESSortAlgorithm == SortAlgorithm.Radix)
-                {
-                    var sortShaderGLES = Resources.Load<ComputeShader>("GaussianSplatSortGLES");
-                    if (sortShaderGLES != null)
-                    {
-                        _gpuSorterGLES = new GaussianSplatGPUSorterGLES(sortShaderGLES, _count);
-                        Debug.Log($"[GaussianSplatRenderer] Using RADIX sort (Graphics API: {SystemInfo.graphicsDeviceType})");
-                    }
-                    else
-                    {
-                        Debug.LogWarning("[GaussianSplatRenderer] Could not load GaussianSplatSortGLES compute shader. Falling back to CPU sorting.");
-                    }
-                }
+                Debug.Log($"[GaussianSplatRenderer] Sorting DISABLED - fastest but may have visual artifacts (Graphics API: {SystemInfo.graphicsDeviceType})");
+                // No sorter needed, identity order will be used
             }
-            else
+            else if (GLESSortAlgorithm == SortAlgorithm.Bitonic)
             {
-                var sortShader = Resources.Load<ComputeShader>("GaussianSplatSort");
-                if (sortShader != null)
+                var sortShaderBitonic = Resources.Load<ComputeShader>("GaussianSplatBitonicSort");
+                if (sortShaderBitonic != null)
                 {
-                    _gpuSorter = new GaussianSplatGPUSorter(sortShader, _count);
-                    Debug.Log($"[GaussianSplatRenderer] Using standard GPU sorter with wave intrinsics (Graphics API: {SystemInfo.graphicsDeviceType})");
+                    _gpuSorterBitonic = new GaussianSplatBitonicSorter(sortShaderBitonic, _count);
+                    Debug.Log($"[GaussianSplatRenderer] Using BITONIC sort (Graphics API: {SystemInfo.graphicsDeviceType})");
                 }
                 else
                 {
-                    Debug.LogWarning("[GaussianSplatRenderer] Could not load GaussianSplatSort compute shader. Falling back to CPU sorting.");
+                    Debug.LogWarning("[GaussianSplatRenderer] Could not load GaussianSplatBitonicSort compute shader. Falling back to radix sort.");
+                    GLESSortAlgorithm = SortAlgorithm.Radix;
+                }
+            }
+            
+            if (GLESSortAlgorithm == SortAlgorithm.Radix)
+            {
+                var sortShaderGLES = Resources.Load<ComputeShader>("GaussianSplatSortGLES");
+                if (sortShaderGLES != null)
+                {
+                    _gpuSorterGLES = new GaussianSplatGPUSorterGLES(sortShaderGLES, _count);
+                    Debug.Log($"[GaussianSplatRenderer] Using RADIX sort (Graphics API: {SystemInfo.graphicsDeviceType})");
+                }
+                else
+                {
+                    Debug.LogWarning("[GaussianSplatRenderer] Could not load GaussianSplatSortGLES compute shader.");
                 }
             }
             
@@ -950,7 +925,7 @@ namespace GaussianSplatting
                         _visibleCount = _count;
                     }
                 }
-                else if (_gpuSorter != null)
+                else if (_gpuSorter != null && !_useMobilePath)
                 {
                     // Standard GPU sorter (wave intrinsics)
                     Matrix4x4 sortModelMatrix = transform.localToWorldMatrix;
@@ -1088,7 +1063,7 @@ namespace GaussianSplatting
                 }
                 else if (_gpuSorterBitonic != null)
                 {
-                    // Bitonic sort path
+                    // Bitonic sort path (GLES compatible)
                     Matrix4x4 sortModelMatrix = transform.localToWorldMatrix;
                     Matrix4x4 sortViewMatrix = camera.worldToCameraMatrix;
                     Matrix4x4 modelViewMatrix = sortViewMatrix * sortModelMatrix;
@@ -1109,7 +1084,7 @@ namespace GaussianSplatting
                 }
                 else if (_gpuSorterGLES != null)
                 {
-                    // Radix sort path
+                    // Radix sort path (GLES compatible)
                     Matrix4x4 sortModelMatrix = transform.localToWorldMatrix;
                     Matrix4x4 sortViewMatrix = camera.worldToCameraMatrix;
                     Matrix4x4 modelViewMatrix = sortViewMatrix * sortModelMatrix;
@@ -1128,16 +1103,7 @@ namespace GaussianSplatting
                         _visibleCount = _count;
                     }
                 }
-                else if (_gpuSorter != null)
-                {
-                    // Standard GPU sorter (wave intrinsics)
-                    Matrix4x4 sortModelMatrix = transform.localToWorldMatrix;
-                    Matrix4x4 sortViewMatrix = camera.worldToCameraMatrix;
-                    Matrix4x4 modelViewMatrix = sortViewMatrix * sortModelMatrix;
-                    _gpuSorter.Sort(_centers, _order, modelViewMatrix, camPosOS, camDirOS);
-                    _visibleCount = _count;
-                }
-                // No CPU fallback - if no GPU sorter, identity order is used
+                // Standard PC/Vulkan sorter REMOVED - everything runs on GLES path now
             }
 
             float w = camera.pixelWidth;
