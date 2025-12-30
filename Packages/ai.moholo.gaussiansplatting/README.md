@@ -146,6 +146,13 @@ The Gaussian Splat shader has these properties:
 
 ## Platform Notes
 
+### VR Platforms
+- **Meta Quest**: Supported via OpenGL ES 3.1 and Vulkan
+  - OpenGL ES 3.1: Uses optimized packed buffer path
+  - Vulkan: Uses full-featured path with Spherical Harmonics
+- **Apple Vision Pro**: Supported via Metal (uses full-featured path with Spherical Harmonics)
+- Both platforms automatically select the correct graphics API (Metal, Vulkan, or OpenGL ES) based on device capabilities
+
 ### Android/iOS
 - PLY files must be in `StreamingAssets/GaussianSplatting/`
 - Loading uses `UnityWebRequest` automatically
