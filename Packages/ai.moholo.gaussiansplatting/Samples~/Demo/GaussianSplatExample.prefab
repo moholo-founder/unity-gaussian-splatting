@@ -13,7 +13,7 @@ GameObject:
   - component: {fileID: 1516018672048090526}
   - component: {fileID: 1167433799574837836}
   m_Layer: 0
-  m_Name: GSExample
+  m_Name: GaussianSplatExample
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -46,17 +46,17 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b2b9050f92109224991332d73c0048bb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: ai.moholo.gaussiansplatting::GaussianSplatting.GaussianSplatRenderer
-  PlyUrl: https://storage.googleapis.com/toykind-public/resources/gaussian_b47e269d-055b-4aa6-8240-bf105da1824a.ply
-  PlyFileName: cactus_splat3_30kSteps_719k_splats.ply
+  PlyUrl: 
+  PlyFileName: houseplant.ply
   Material: {fileID: 2100000, guid: 05a667fb14e1e4a40800cef36518b4c2, type: 2}
   TargetCamera: {fileID: 0}
-  SortEveryNFrames: 1
-  UseRenderFeature: 0
   ScaleMultiplier: 1
   MaxSplatsToLoad: 0
+  SortEveryNFrames: 1
+  UseRenderFeature: 0
   EnableFrustumCulling: 1
   FrustumCullMargin: 0.3
-  SortingAlgorithm: 1
+  SortingAlgorithm: 0
   LogPerformanceEveryNFrames: 0
 --- !u!114 &1516018672048090526
 MonoBehaviour:
