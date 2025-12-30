@@ -115,9 +115,8 @@ namespace GaussianSplatting
         private string _lastLoadedSource = ""; // Track last loaded file/URL
 
         [Header("Rendering")]
+        [Tooltip("Material using the unified GaussianSplatting/Gaussian Splat shader. The shader automatically selects the correct SubShader for Vulkan/Metal/D3D vs GLES.")]
         public Material Material;
-        [Tooltip("Material for OpenGL ES (auto-selected when on GLES). Leave empty to auto-create from GaussianSplatGLES shader.")]
-        public Material MaterialGLES;
         public Camera TargetCamera;
         
         [Tooltip("How often to sort splats (in frames). 1 = every frame, 2 = every other frame, etc.")]
@@ -143,7 +142,7 @@ namespace GaussianSplatting
         public float FrustumCullMargin = 0.3f;
         
         [Tooltip("Sort algorithm for GLES. Bitonic is simpler with fewer dispatches, better for very large splat counts. Radix is faster for smaller counts.")]
-        public SortAlgorithm GLESSortAlgorithm = SortAlgorithm.Radix;
+        public SortAlgorithm GLESSortAlgorithm = SortAlgorithm.Bitonic;
         
         [Header("Debug")]
         [Tooltip("Log performance metrics every N frames (0 = disabled)")]
@@ -183,7 +182,7 @@ namespace GaussianSplatting
         private GaussianSplatBitonicSorter _gpuSorterBitonic;
         private MaterialPropertyBlock _mpb;
         private GaussianSplatAsset _loadedAsset; // Track which asset is currently loaded
-        private Material _activeMaterial; // The material currently in use (either Material or MaterialGLES)
+        private Material _activeMaterial; // The material currently in use
         private bool _isUsingGLES; // Track if we're using GLES path
         
         [System.NonSerialized]
@@ -368,37 +367,15 @@ namespace GaussianSplatting
                 return;
             }
 
-            // Determine if we need GLES path
+            // Determine if we need GLES path (affects buffer layout, not material selection)
+            // The unified shader has SubShaders for both APIs - Unity selects the correct one automatically
             _isUsingGLES = SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.OpenGLES3 ||
                            SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.OpenGLES2;
             
-            // Select appropriate material
-            if (_isUsingGLES)
-            {
-                // Try to use GLES material, or create one if not provided
-                if (MaterialGLES == null)
-                {
-                    var glesShader = Shader.Find("GaussianSplatting/Gaussian Splat GLES");
-                    if (glesShader != null)
-                    {
-                        MaterialGLES = new Material(glesShader);
-                        MaterialGLES.name = "GaussianSplatGLES (Auto)";
-                        Debug.Log("[GaussianSplatRenderer] Auto-created GLES material");
-                    }
-                    else
-                    {
-                        Debug.LogWarning("[GaussianSplatRenderer] Could not find GLES shader, falling back to standard shader");
-                        _isUsingGLES = false;
-                    }
-                }
-                _activeMaterial = _isUsingGLES ? MaterialGLES : Material;
-            }
-            else
-            {
-                _activeMaterial = Material;
-            }
+            // Use the single unified material - shader has SubShaders for Vulkan/Metal/D3D and GLES
+            _activeMaterial = Material;
             
-            Debug.Log($"[GaussianSplatRenderer] Using {(_isUsingGLES ? "GLES" : "standard")} material: {_activeMaterial?.name}");
+            Debug.Log($"[GaussianSplatRenderer] Using unified shader, API path: {(_isUsingGLES ? "GLES (packed buffers)" : "standard (separate buffers)")}. Graphics API: {SystemInfo.graphicsDeviceType}");
 
             // Force reload if deserialization occurred (e.g., after scene save/load)
             // or if buffers don't exist or asset changed
