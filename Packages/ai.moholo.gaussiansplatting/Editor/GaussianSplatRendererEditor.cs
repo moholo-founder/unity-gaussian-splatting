@@ -4,11 +4,253 @@ using System.Collections;
 using System.IO;
 using System.Linq;
 using UnityEditor;
+using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.Networking;
 
 namespace GaussianSplatting.Editor
 {
+    /// <summary>
+    /// Static initializer that loads PLY files for all GaussianSplatRenderer components when scenes are opened.
+    /// </summary>
+    [InitializeOnLoad]
+    public static class GaussianSplatSceneLoader
+    {
+        private static double _lastLoadTime = 0;
+        private const double LOAD_DEBOUNCE_SECONDS = 0.5;
+
+        static GaussianSplatSceneLoader()
+        {
+            EditorSceneManager.sceneOpened += OnSceneOpened;
+            EditorApplication.hierarchyChanged += OnHierarchyChanged;
+            // Also load when editor first starts up (in case scene is already open)
+            EditorApplication.delayCall += () => {
+                if (!Application.isPlaying)
+                {
+                    LoadAllRenderersInScene();
+                }
+            };
+        }
+
+        private static void OnSceneOpened(UnityEngine.SceneManagement.Scene scene, OpenSceneMode mode)
+        {
+            Debug.Log($"[GaussianSplatSceneLoader] Scene opened: {scene.name}");
+            // Delay slightly to ensure all objects are initialized
+            EditorApplication.delayCall += LoadAllRenderersInScene;
+        }
+
+        private static void OnHierarchyChanged()
+        {
+            // Debounce to avoid excessive loading on every hierarchy change
+            double currentTime = EditorApplication.timeSinceStartup;
+            if (currentTime - _lastLoadTime < LOAD_DEBOUNCE_SECONDS) return;
+            
+            _lastLoadTime = currentTime;
+            // Delay loading slightly to ensure all objects are fully initialized
+            EditorApplication.delayCall += LoadAllRenderersInScene;
+        }
+
+        private static void LoadAllRenderersInScene()
+        {
+            if (Application.isPlaying) return;
+
+            var renderers = UnityEngine.Object.FindObjectsByType<GaussianSplatRenderer>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+            if (renderers == null || renderers.Length == 0) return;
+
+            foreach (var renderer in renderers)
+            {
+                if (renderer == null) continue;
+                
+                // Load even if not active/enabled - we just need the asset loaded
+                if (renderer.PlyAsset == null)
+                {
+                    // Only load if we have a URL or filename set
+                    if (!string.IsNullOrEmpty(renderer.PlyUrl))
+                    {
+                        Debug.Log($"[GaussianSplatSceneLoader] Auto-loading PLY from URL for {renderer.name}");
+                        LoadPlyFromUrlStatic(renderer);
+                    }
+                    else if (!string.IsNullOrEmpty(renderer.PlyFileName))
+                    {
+                        Debug.Log($"[GaussianSplatSceneLoader] Auto-loading PLY file '{renderer.PlyFileName}' for {renderer.name}");
+                        LoadPlyInEditorStatic(renderer);
+                    }
+                }
+            }
+        }
+
+        private static void LoadPlyInEditorStatic(GaussianSplatRenderer renderer)
+        {
+            if (string.IsNullOrEmpty(renderer.PlyFileName)) return;
+
+            string filePath = Path.Combine(Application.streamingAssetsPath, "GaussianSplatting", renderer.PlyFileName);
+            
+            if (!File.Exists(filePath)) return;
+
+            try
+            {
+                byte[] fileBytes = File.ReadAllBytes(filePath);
+                var plyData = PlyGaussianSplatLoader.Load(fileBytes, CoordinateConversion.RightHandedToUnity);
+                
+                var asset = ScriptableObject.CreateInstance<GaussianSplatAsset>();
+                asset.name = Path.GetFileNameWithoutExtension(renderer.PlyFileName);
+                asset.Count = plyData.Count;
+                asset.Centers = plyData.Centers;
+                asset.Rotations = plyData.Rotations;
+                asset.Scales = plyData.Scales;
+                asset.Colors = plyData.Colors;
+                asset.ShBands = plyData.ShBands;
+                asset.ShCoeffsPerSplat = plyData.ShCoeffsPerSplat;
+                asset.ShCoeffs = plyData.ShCoeffs;
+
+                renderer.PlyAsset = asset;
+                
+                if (renderer.isActiveAndEnabled)
+                {
+                    renderer.LoadAssetToGPU();
+                }
+                
+                EditorUtility.SetDirty(renderer);
+                SceneView.RepaintAll();
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogError($"Error loading PLY in Editor (scene load): {ex.Message}");
+            }
+        }
+
+        private static UnityWebRequest _staticPendingRequest;
+        private static GaussianSplatRenderer _staticPendingRenderer;
+        private static string _staticPendingUrl;
+
+        private static void LoadPlyFromUrlStatic(GaussianSplatRenderer renderer)
+        {
+            if (string.IsNullOrEmpty(renderer.PlyUrl)) return;
+            if (_staticPendingRequest != null) return; // Already loading
+
+            _staticPendingUrl = renderer.PlyUrl;
+            _staticPendingRenderer = renderer;
+            _staticPendingRequest = UnityWebRequest.Get(_staticPendingUrl);
+            _staticPendingRequest.SendWebRequest();
+            
+            EditorApplication.update += UpdateStaticUrlLoad;
+        }
+
+        private static void UpdateStaticUrlLoad()
+        {
+            if (_staticPendingRequest == null)
+            {
+                EditorApplication.update -= UpdateStaticUrlLoad;
+                return;
+            }
+
+            if (_staticPendingRenderer == null)
+            {
+                EditorApplication.update -= UpdateStaticUrlLoad;
+                CleanupStaticRequest();
+                return;
+            }
+
+            if (!_staticPendingRequest.isDone) return;
+
+            EditorApplication.update -= UpdateStaticUrlLoad;
+            ProcessStaticUrlLoadResult();
+        }
+
+        private static void ProcessStaticUrlLoadResult()
+        {
+            try
+            {
+                if (_staticPendingRenderer == null)
+                {
+                    CleanupStaticRequest();
+                    return;
+                }
+
+                if (_staticPendingRequest.result == UnityWebRequest.Result.ConnectionError || 
+                    _staticPendingRequest.result == UnityWebRequest.Result.ProtocolError)
+                {
+                    Debug.LogError($"[Editor] Error loading PLY from URL: {_staticPendingRequest.error}");
+                    CleanupStaticRequest();
+                    return;
+                }
+
+                byte[] fileBytes = _staticPendingRequest.downloadHandler.data;
+                
+                if (fileBytes == null || fileBytes.Length == 0)
+                {
+                    CleanupStaticRequest();
+                    return;
+                }
+
+                if (fileBytes.Length < 3)
+                {
+                    CleanupStaticRequest();
+                    return;
+                }
+
+                string headerStart = System.Text.Encoding.ASCII.GetString(fileBytes, 0, Math.Min(3, fileBytes.Length));
+                if (!headerStart.Equals("ply", StringComparison.OrdinalIgnoreCase))
+                {
+                    CleanupStaticRequest();
+                    return;
+                }
+
+                var plyData = PlyGaussianSplatLoader.Load(fileBytes, CoordinateConversion.RightHandedToUnity);
+                
+                if (_staticPendingRenderer == null)
+                {
+                    CleanupStaticRequest();
+                    return;
+                }
+
+                var asset = ScriptableObject.CreateInstance<GaussianSplatAsset>();
+                string assetName = Path.GetFileNameWithoutExtension(_staticPendingUrl);
+                if (string.IsNullOrEmpty(assetName) || assetName == _staticPendingUrl)
+                    assetName = "url_splat";
+                asset.name = assetName;
+                asset.Count = plyData.Count;
+                asset.Centers = plyData.Centers;
+                asset.Rotations = plyData.Rotations;
+                asset.Scales = plyData.Scales;
+                asset.Colors = plyData.Colors;
+                asset.ShBands = plyData.ShBands;
+                asset.ShCoeffsPerSplat = plyData.ShCoeffsPerSplat;
+                asset.ShCoeffs = plyData.ShCoeffs;
+
+                _staticPendingRenderer.PlyAsset = asset;
+                
+                EditorUtility.SetDirty(_staticPendingRenderer);
+                
+                if (_staticPendingRenderer.isActiveAndEnabled)
+                {
+                    _staticPendingRenderer.LoadAssetToGPU();
+                }
+                
+                SceneView.RepaintAll();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error parsing PLY in Editor (scene load): {ex.Message}");
+            }
+            finally
+            {
+                CleanupStaticRequest();
+            }
+        }
+
+        private static void CleanupStaticRequest()
+        {
+            if (_staticPendingRequest != null)
+            {
+                _staticPendingRequest.Dispose();
+                _staticPendingRequest = null;
+            }
+            _staticPendingRenderer = null;
+            _staticPendingUrl = null;
+        }
+    }
+
     [CustomEditor(typeof(GaussianSplatRenderer))]
     public class GaussianSplatRendererEditor : UnityEditor.Editor
     {
