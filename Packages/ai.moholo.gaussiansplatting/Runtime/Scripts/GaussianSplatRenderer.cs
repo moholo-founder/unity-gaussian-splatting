@@ -185,6 +185,7 @@ namespace GaussianSplatting
         private GaussianSplatAsset _loadedAsset; // Track which asset is currently loaded
         private Material _activeMaterial; // The material currently in use (either Material or MaterialGLES)
         private bool _isUsingGLES; // Track if we're using GLES path
+        private bool _useMobilePath; // Track if we should use mobile-optimized path (packed buffers, GLES sorters)
         
         [System.NonSerialized]
         private bool _needsReload = false; // Set to true after deserialization to force buffer reload
@@ -372,6 +373,9 @@ namespace GaussianSplatting
             _isUsingGLES = SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.OpenGLES3 ||
                            SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.OpenGLES2;
             
+            // Use mobile path (packed buffers, GLES sorters) if on GLES, mobile platform, or wave intrinsics missing
+            _useMobilePath = _isUsingGLES || Application.isMobilePlatform || !SystemInfo.supportsComputeShaders;
+            
             // Select appropriate material
             if (_isUsingGLES)
             {
@@ -455,8 +459,9 @@ namespace GaussianSplatting
                 scales[i] = scales[i] * ScaleMultiplier;
             }
 
-            if (_isUsingGLES)
+            if (_useMobilePath)
             {
+                // Mobile Path (GLES or Mobile Vulkan): Must use packed buffers
                 // GLES 3.1 STRICT: Must use only 4 SSBOs total (including order buffer)
                 // OPTIMIZATION: Precompute 3D covariance on CPU to avoid per-vertex computation
                 //
@@ -502,11 +507,11 @@ namespace GaussianSplatting
                 _activeMaterial.SetBuffer("_SplatCovB", _glesRotation);
                 _activeMaterial.SetBuffer("_SplatCovCColor", _glesColor);
                 
-                Debug.Log($"[GaussianSplatRenderer] Created GLES packed buffers with PRECOMPUTED 3D COVARIANCE (4 SSBOs strict)");
+                Debug.Log($"[GaussianSplatRenderer] Created mobile packed buffers (API: {SystemInfo.graphicsDeviceType})");
             }
             else
             {
-                // Standard path: Separate buffers (5+ SSBOs OK on Vulkan/Metal/D3D)
+                // Standard path: Separate buffers (5+ SSBOs OK on PC Vulkan/Metal/D3D)
                 _centers = new GraphicsBuffer(GraphicsBuffer.Target.Structured, _count, sizeof(float) * 3);
                 _rotations = new GraphicsBuffer(GraphicsBuffer.Target.Structured, _count, sizeof(float) * 4);
                 _scales = new GraphicsBuffer(GraphicsBuffer.Target.Structured, _count, sizeof(float) * 3);
@@ -539,12 +544,7 @@ namespace GaussianSplatting
             _worldBounds = TransformBounds(_localBounds, transform.localToWorldMatrix);
 
             // Create GPU sorter - choose based on graphics API capability
-            // OpenGL ES doesn't support wave intrinsics, so use GLES-compatible sorter
-            bool useGLESSorter = SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.OpenGLES3 ||
-                                 SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.OpenGLES2 ||
-                                 !SystemInfo.supportsComputeShaders;
-            
-            if (useGLESSorter)
+            if (_useMobilePath)
             {
                 if (GLESSortAlgorithm == SortAlgorithm.None)
                 {
@@ -903,7 +903,7 @@ namespace GaussianSplatting
                 var camPosOS = transform.InverseTransformPoint(camera.transform.position);
                 var camDirOS = transform.InverseTransformDirection(camera.transform.forward).normalized;
 
-                if (GLESSortAlgorithm == SortAlgorithm.None && _isUsingGLES)
+                if (GLESSortAlgorithm == SortAlgorithm.None && _useMobilePath)
                 {
                     // No sorting - use identity order (fastest, may have visual artifacts)
                     _visibleCount = _count;
@@ -984,9 +984,9 @@ namespace GaussianSplatting
             var viewportSize = new Vector4(w, h, 1f / Mathf.Max(1f, w), 1f / Mathf.Max(1f, h));
 
 
-            // Ensure buffers are bound (may be lost after scene save/reload)
+            // Ensure buffers are bound
             _activeMaterial.SetBuffer("_SplatOrder", _order);
-            if (_isUsingGLES)
+            if (_useMobilePath)
             {
                 _activeMaterial.SetBuffer("_SplatPosCovA", _glesPosScale);
                 _activeMaterial.SetBuffer("_SplatCovB", _glesRotation);
@@ -1010,8 +1010,8 @@ namespace GaussianSplatting
                 _mpb.SetVector("_ViewportSize", viewportSize);
                 _mpb.SetFloat("_IsOrtho", camera.orthographic ? 1f : 0f);
                 _mpb.SetInt("_NumSplats", _visibleCount);
-                _mpb.SetInt("_SHBands", _isUsingGLES ? 0 : _shBands);
-                _mpb.SetInt("_SHCoeffsPerSplat", _isUsingGLES ? 0 : _shCoeffsPerSplat);
+                _mpb.SetInt("_SHBands", _useMobilePath ? 0 : _shBands);
+                _mpb.SetInt("_SHCoeffsPerSplat", _useMobilePath ? 0 : _shCoeffsPerSplat);
 
                 // Custom model matrices (UNITY_MATRIX_M can't be written in URP constant buffers)
                 _mpb.SetMatrix("_SplatObjectToWorld", transform.localToWorldMatrix);
@@ -1023,8 +1023,8 @@ namespace GaussianSplatting
                 _activeMaterial.SetVector("_ViewportSize", viewportSize);
                 _activeMaterial.SetFloat("_IsOrtho", camera.orthographic ? 1f : 0f);
                 _activeMaterial.SetInt("_NumSplats", _visibleCount);
-                _activeMaterial.SetInt("_SHBands", _isUsingGLES ? 0 : _shBands);
-                _activeMaterial.SetInt("_SHCoeffsPerSplat", _isUsingGLES ? 0 : _shCoeffsPerSplat);
+                _activeMaterial.SetInt("_SHBands", _useMobilePath ? 0 : _shBands);
+                _activeMaterial.SetInt("_SHCoeffsPerSplat", _useMobilePath ? 0 : _shCoeffsPerSplat);
 
                 // Custom model matrices (UNITY_MATRIX_M can't be written in URP constant buffers)
                 _activeMaterial.SetMatrix("_SplatObjectToWorld", transform.localToWorldMatrix);
@@ -1081,7 +1081,7 @@ namespace GaussianSplatting
                 var camPosOS = transform.InverseTransformPoint(camera.transform.position);
                 var camDirOS = transform.InverseTransformDirection(camera.transform.forward).normalized;
 
-                if (GLESSortAlgorithm == SortAlgorithm.None && _isUsingGLES)
+                if (GLESSortAlgorithm == SortAlgorithm.None && _useMobilePath)
                 {
                     // No sorting - use identity order (fastest, may have visual artifacts)
                     _visibleCount = _count;
@@ -1167,9 +1167,9 @@ namespace GaussianSplatting
             _mpb.Clear();
             _mpb.SetVector("_ViewportSize", viewportSize);
             _mpb.SetFloat("_IsOrtho", camera.orthographic ? 1f : 0f);
-            _mpb.SetInt("_NumSplats", _visibleCount);
-            _mpb.SetInt("_SHBands", _isUsingGLES ? 0 : _shBands);
-            _mpb.SetInt("_SHCoeffsPerSplat", _isUsingGLES ? 0 : _shCoeffsPerSplat);
+                _mpb.SetInt("_NumSplats", _visibleCount);
+                _mpb.SetInt("_SHBands", _useMobilePath ? 0 : _shBands);
+                _mpb.SetInt("_SHCoeffsPerSplat", _useMobilePath ? 0 : _shCoeffsPerSplat);
             _mpb.SetMatrix("_SplatObjectToWorld", transform.localToWorldMatrix);
             _mpb.SetMatrix("_SplatWorldToObject", transform.worldToLocalMatrix);
 
