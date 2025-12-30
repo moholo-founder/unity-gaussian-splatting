@@ -370,11 +370,11 @@ namespace GaussianSplatting
                 return;
             }
 
-            // FORCE GLES 3.1 PATH FOR ALL PLATFORMS
+            // FORCE GLES 3.1 PATH FOR ALL PLATFORMS (Packed buffers, Bitonic sort)
             _isUsingGLES = true; 
             _useMobilePath = true;
             
-            // Try to use GLES material
+            // Try to use GLES material, fallback to standard material if needed
             if (MaterialGLES == null)
             {
                 var glesShader = Shader.Find("GaussianSplatting/Gaussian Splat GLES");
@@ -384,14 +384,17 @@ namespace GaussianSplatting
                     MaterialGLES.name = "GaussianSplatGLES (Auto)";
                     Debug.Log("[GaussianSplatRenderer] Auto-created GLES material");
                 }
-                else
-                {
-                    Debug.LogError("[GaussianSplatRenderer] Could not find GLES shader! Rendering will fail.");
-                }
             }
-            _activeMaterial = MaterialGLES;
+            _activeMaterial = (MaterialGLES != null) ? MaterialGLES : Material;
             
-            Debug.Log($"[GaussianSplatRenderer] FORCED GLES 3.1 PATH (API: {SystemInfo.graphicsDeviceType})");
+            if (_activeMaterial == null)
+            {
+                Debug.LogError("[GaussianSplatRenderer] No material available for rendering!");
+            }
+            else
+            {
+                Debug.Log($"[GaussianSplatRenderer] FORCED GLES 3.1 PATH using material: {_activeMaterial.name} (API: {SystemInfo.graphicsDeviceType})");
+            }
 
             // Force reload if deserialization occurred (e.g., after scene save/load)
             // or if buffers don't exist, asset changed, or graphics path changed
@@ -857,7 +860,8 @@ namespace GaussianSplatting
             if (!_firstRenderLogged)
             {
                 _firstRenderLogged = true;
-                Debug.Log($"[GS-PERF] First render call! Camera={camera.name}, UseRenderFeature={UseRenderFeature}, cmd={(cmd != null ? "CommandBuffer" : "null")}");
+                Debug.Log($"[GS-PERF] First render call! Camera={camera.name}, visible={_visibleCount}/{_count}, material={_activeMaterial?.name}, shader={_activeMaterial?.shader?.name}, mobile={_useMobilePath}");
+                Debug.Log($"[GS-PERF] Viewport: {w}x{h}, Proj00: {camera.projectionMatrix[0,0]}, Proj11: {camera.projectionMatrix[1,1]}");
             }
             
             // Track frame time
@@ -988,6 +992,23 @@ namespace GaussianSplatting
                 _mpb.SetInt("_SHBands", _useMobilePath ? 0 : _shBands);
                 _mpb.SetInt("_SHCoeffsPerSplat", _useMobilePath ? 0 : _shCoeffsPerSplat);
 
+                // Set buffers on MPB as well for safety
+                _mpb.SetBuffer("_SplatOrder", _order);
+                if (_useMobilePath)
+                {
+                    _mpb.SetBuffer("_SplatPosCovA", _glesPosScale);
+                    _mpb.SetBuffer("_SplatCovB", _glesRotation);
+                    _mpb.SetBuffer("_SplatCovCColor", _glesColor);
+                }
+                else
+                {
+                    _mpb.SetBuffer("_Centers", _centers);
+                    _mpb.SetBuffer("_Rotations", _rotations);
+                    _mpb.SetBuffer("_Scales", _scales);
+                    _mpb.SetBuffer("_Colors", _colors);
+                    if (_shCoeffs != null) _mpb.SetBuffer("_SHCoeffs", _shCoeffs);
+                }
+
                 // Custom model matrices (UNITY_MATRIX_M can't be written in URP constant buffers)
                 _mpb.SetMatrix("_SplatObjectToWorld", transform.localToWorldMatrix);
                 _mpb.SetMatrix("_SplatWorldToObject", transform.worldToLocalMatrix);
@@ -1013,6 +1034,10 @@ namespace GaussianSplatting
                 ? TransformBounds(_localBounds, transform.localToWorldMatrix) 
                 : new Bounds(transform.position, Vector3.one * 100000f);
             
+            // Pass projection matrix values for focal length calculation
+            _mpb.SetFloat("_CamProjM00", camera.projectionMatrix[0, 0]);
+            _mpb.SetFloat("_CamProjM11", camera.projectionMatrix[1, 1]);
+
             if (cmd != null)
             {
                 // URP Render Feature path: use CommandBuffer for proper matrix setup
@@ -1114,7 +1139,7 @@ namespace GaussianSplatting
             // RasterCommandBuffer path (RenderGraph): use MPB so per-object/per-camera data is captured per draw.
             // Note: Buffers must be set on Material (not MaterialPropertyBlock) as MPB doesn't support buffers
             _activeMaterial.SetBuffer("_SplatOrder", _order);
-            if (_isUsingGLES)
+            if (_useMobilePath)
             {
                 _activeMaterial.SetBuffer("_SplatPosCovA", _glesPosScale);
                 _activeMaterial.SetBuffer("_SplatCovB", _glesRotation);
@@ -1133,9 +1158,19 @@ namespace GaussianSplatting
             _mpb.Clear();
             _mpb.SetVector("_ViewportSize", viewportSize);
             _mpb.SetFloat("_IsOrtho", camera.orthographic ? 1f : 0f);
-                _mpb.SetInt("_NumSplats", _visibleCount);
-                _mpb.SetInt("_SHBands", _useMobilePath ? 0 : _shBands);
-                _mpb.SetInt("_SHCoeffsPerSplat", _useMobilePath ? 0 : _shCoeffsPerSplat);
+            _mpb.SetInt("_NumSplats", _visibleCount);
+            _mpb.SetInt("_SHBands", _useMobilePath ? 0 : _shBands);
+            _mpb.SetInt("_SHCoeffsPerSplat", _useMobilePath ? 0 : _shCoeffsPerSplat);
+
+            // Set buffers on MPB as well for safety
+            _mpb.SetBuffer("_SplatOrder", _order);
+            if (_useMobilePath)
+            {
+                _mpb.SetBuffer("_SplatPosCovA", _glesPosScale);
+                _mpb.SetBuffer("_SplatCovB", _glesRotation);
+                _mpb.SetBuffer("_SplatCovCColor", _glesColor);
+            }
+
             _mpb.SetMatrix("_SplatObjectToWorld", transform.localToWorldMatrix);
             _mpb.SetMatrix("_SplatWorldToObject", transform.worldToLocalMatrix);
 

@@ -31,7 +31,6 @@ Shader "GaussianSplatting/Gaussian Splat GLES"
 
             HLSLPROGRAM
             #pragma target 3.5
-            #pragma only_renderers gles3
             #pragma vertex Vert
             #pragma fragment Frag
 
