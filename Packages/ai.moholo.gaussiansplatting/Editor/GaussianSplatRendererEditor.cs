@@ -333,11 +333,21 @@ namespace GaussianSplatting.Editor
             // Header
             EditorGUILayout.LabelField("Input - StreamingAssets or URL", EditorStyles.boldLabel);
 
-            // PLY URL field (takes precedence)
+            // PLY URL field (disables Streaming Assets)
+            var urlInstructionStyle = new GUIStyle(EditorStyles.helpBox);
+            urlInstructionStyle.wordWrap = true;
+            EditorGUILayout.LabelField("Provide URL to internet-hosted gaussian splatting ply file.", urlInstructionStyle);
             EditorGUI.BeginChangeCheck();
             string previousUrl = renderer.PlyUrl;
-            renderer.PlyUrl = EditorGUILayout.TextField("PLY URL (prioritized)", renderer.PlyUrl);
+            renderer.PlyUrl = EditorGUILayout.TextField("PLY URL (disables Streaming Assets)", renderer.PlyUrl);
             bool urlChanged = EditorGUI.EndChangeCheck();
+            
+            // Instruction below PLY URL
+            EditorGUILayout.Space(2);
+            var instructionStyle = new GUIStyle(EditorStyles.helpBox);
+            instructionStyle.wordWrap = true;
+            EditorGUILayout.LabelField("Place gaussian splatting files in .ply format in Assets/StreamingAssets/GaussianSplatting. You can find example ply file in Samples.", instructionStyle);
+            EditorGUILayout.Space(2);
             
             if (urlChanged && previousUrl != renderer.PlyUrl)
             {
@@ -358,7 +368,7 @@ namespace GaussianSplatting.Editor
             // Show info if URL is being used
             if (!string.IsNullOrEmpty(renderer.PlyUrl))
             {
-                EditorGUILayout.HelpBox($"Loading from URL: {renderer.PlyUrl}\n(URL takes precedence over file dropdown)", MessageType.Info);
+                EditorGUILayout.HelpBox($"Loading from URL: {renderer.PlyUrl}\n(URL disables Streaming Assets file dropdown)", MessageType.Info);
             }
 
             EditorGUILayout.Space();
@@ -402,7 +412,7 @@ namespace GaussianSplatting.Editor
             EditorGUI.EndDisabledGroup();
 
             // Refresh button
-            if (GUILayout.Button("Refresh PLY Files List"))
+            if (GUILayout.Button("Refresh PLY list from Streaming Assets/GaussianSplatting"))
             {
                 RefreshPlyFiles();
             }

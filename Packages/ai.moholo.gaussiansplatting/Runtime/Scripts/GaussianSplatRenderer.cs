@@ -13,11 +13,11 @@ namespace GaussianSplatting
     /// </summary>
     public enum SortAlgorithm
     {
-        /// <summary>Radix sort - 4 passes, good for medium splat counts (&lt;500K)</summary>
-        Radix,
-        /// <summary>Bitonic sort - fewer dispatches, better for large splat counts (&gt;500K)</summary>
+        /// <summary>Bitonic sort - fastest in most cases, fewer dispatches, better for large splat counts (&gt;500K)</summary>
         Bitonic,
-        /// <summary>No sorting - fastest but may have visual artifacts. Use with SortEveryNFrames for periodic sorting.</summary>
+        /// <summary>Radix sort - 4 passes</summary>
+        Radix,
+        /// <summary>No sorting - only for testing/debugging.</summary>
         None
     }
 
@@ -101,7 +101,7 @@ namespace GaussianSplatting
         }
 
         [Header("Input - StreamingAssets or URL")]
-        [Tooltip("Full URL to load PLY from (prioritized over PlyFileName). Example: https://example.com/splat.ply")]
+        [Tooltip("Full URL to load PLY from (disables Streaming Assets). Example: https://example.com/splat.ply")]
         public string PlyUrl = "";
         
         [Tooltip("PLY filename in StreamingAssets/GaussianSplatting/ folder (e.g., 'testsplat.ply'). Used if PlyUrl is empty.")]
@@ -118,13 +118,6 @@ namespace GaussianSplatting
         [Tooltip("Material using the unified GaussianSplatting/Gaussian Splat shader. The shader automatically selects the correct SubShader for Vulkan/Metal/D3D vs GLES.")]
         public Material Material;
         public Camera TargetCamera;
-        
-        [Tooltip("How often to sort splats (in frames). 1 = every frame, 2 = every other frame, etc.")]
-        [Range(1, 90)]
-        public int SortEveryNFrames = 1;
-        
-        [Tooltip("Use URP Render Feature for proper matrix setup. Add GaussianSplatRenderFeature to your URP Renderer.")]
-        public bool UseRenderFeature = false;
 
         [Header("Splat Properties")]
         [Tooltip("Scale multiplier for all splats.")]
@@ -135,6 +128,13 @@ namespace GaussianSplatting
         public int MaxSplatsToLoad = 0;
         
         [Header("Performance")]
+        [Tooltip("How often to sort splats (in frames). 1 = every frame, 2 = every other frame, etc.")]
+        [Range(1, 90)]
+        public int SortEveryNFrames = 1;
+        
+        [Tooltip("Use URP Render Feature for proper matrix setup. Add GaussianSplatRenderFeature to your URP Renderer.")]
+        public bool UseRenderFeature = false;
+        
         [Tooltip("Enable GPU frustum culling to skip off-screen splats. Improves performance when only part of the scene is visible.")]
         public bool EnableFrustumCulling = true;
         [Tooltip("Extra margin for frustum culling in NDC space. Larger values prevent popping at screen edges but reduce culling efficiency.")]
