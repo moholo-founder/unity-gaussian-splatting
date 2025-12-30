@@ -5,11 +5,11 @@ A Unity package for rendering Gaussian Splatting point clouds. Supports runtime 
 ## Features
 
 - **Runtime PLY Loading**: Load Gaussian Splat PLY files at runtime from StreamingAssets or URLs
-- **GPU Sorting**: Fast GPU-based radix sort for efficient back-to-front rendering
-- **Spherical Harmonics**: Full support for SH coefficients (bands 1-3)
+- **GPU Sorting**: Fast GPU-based Bitonic sort (fastest) and Radix sort for efficient back-to-front rendering
+- **Spherical Harmonics**: Full support for SH coefficients (bands 1-3) on Vulkan/Metal/D3D
 - **URP Integration**: Works with Universal Render Pipeline via Render Features
-- **Editor Import**: Import PLY files directly in the Unity Editor
-- **Cross-Platform**: Supports Windows, Mac, Linux, Android, iOS, and WebGL
+- **Automatic API Selection**: Unified shader automatically selects optimal path for Vulkan/Metal/D3D vs GLES 3.1
+- **Cross-Platform**: Supports Windows, Mac, Linux, Android, and iOS
 
 ## Requirements
 
@@ -31,15 +31,7 @@ A Unity package for rendering Gaussian Splatting point clouds. Supports runtime 
 
 ## Quick Start
 
-### Method 1: Editor Import
-
-1. Place your `.ply` file in your project's `Assets` folder
-2. Unity will automatically import it as a `GaussianSplatAsset`
-3. Create a Material using the `GaussianSplatting/Gaussian Splat` shader
-4. Add a `GaussianSplatRenderer` component to a GameObject
-5. Assign the imported asset and material to the renderer
-
-### Method 2: Runtime Loading
+### Runtime Loading
 
 1. Place your `.ply` file in `Assets/StreamingAssets/GaussianSplatting/`
 2. Create a Material using the `GaussianSplatting/Gaussian Splat` shader
@@ -50,6 +42,35 @@ A Unity package for rendering Gaussian Splatting point clouds. Supports runtime 
    - Optionally set a target camera
 
 5. Press Play - the PLY will load automatically!
+
+## Graphics API Support
+
+The package automatically selects the optimal rendering path based on your device's graphics API:
+
+### Three Graphics APIs Supported
+
+1. **Vulkan/Metal/D3D11/D3D12** (Desktop & Modern Mobile)
+   - Full-featured path with separate buffers
+   - Supports Spherical Harmonics (SH) lighting
+   - Uses standard GPU sorting with wave intrinsics
+   - Best performance on desktop and modern mobile devices
+
+2. **OpenGL ES 3.1** (Android Mobile)
+   - Optimized path with packed buffers (exactly 4 SSBOs for GLES 3.1 strict compatibility)
+   - Uses precomputed 3D covariance (computed on CPU at load time)
+   - No SH support (GLES limitation)
+   - Automatically selected on GLES 3.1 devices
+
+**Automatic Selection**: The unified `GaussianSplatting/Gaussian Splat` shader contains SubShaders for each API. Unity automatically selects the correct SubShader based on the device's graphics API - you only need one material that works everywhere!
+
+## Demo Scene
+
+The package includes a demo scene in `Samples~/Demo/`:
+- `DemoScene.unity`: Example scene with GSExample prefab
+- `GSExample.prefab`: Pre-configured Gaussian Splat renderer with sample PLY URL
+- `README.md`: Demo-specific documentation
+
+Import the samples via Unity Package Manager to access the demo scene.
 
 ### URP Setup
 
@@ -77,7 +98,9 @@ Main component for rendering Gaussian Splats.
 - `Material`: Material using the Gaussian Splat shader
 - `TargetCamera`: Optional camera to render to (defaults to main camera)
 - `SortEveryNFrames`: How often to sort splats (1 = every frame)
-- `UseRenderFeature`: Use URP Render Feature for proper matrix setup
+- `UseRenderFeature`: Use URP Render Feature for proper matrix setup (recommended)
+- `Sorting Algorithm`: Sort algorithm (Bitonic is default and fastest, Radix is alternative, None is for testing only and will look wrong)
+- `EnableFrustumCulling`: Enable GPU frustum culling to skip off-screen splats
 - `ScaleMultiplier`: Scale multiplier for all splats
 - `MaxSplatsToLoad`: Limit number of splats to load (0 = load all)
 
@@ -115,21 +138,29 @@ The Gaussian Splat shader has these properties:
 
 ## Performance Tips
 
-- **Use Bitonic GPU Sorting**: For most mobile and desktop scenarios, Bitonic sort is significantly faster and more stable than the default Radix sort. It is now the recommended sorting algorithm for Gaussian Splatting.
-- Adjust `SortEveryNFrames` to reduce sorting overhead
-- Use `MaxSplatsToLoad` to limit splat count for testing
-- Enable `UseRenderFeature` for proper URP integration
+- **Bitonic Sort is Fastest**: Bitonic sort is the default and fastest sorting algorithm for Gaussian Splatting. It provides the best performance on both mobile and desktop platforms with fewer GPU dispatches than Radix sort.
+- Adjust `SortEveryNFrames` to reduce sorting overhead (e.g., sort every 2-3 frames for static scenes)
+- Use `MaxSplatsToLoad` to limit splat count for testing/debugging
+- Enable `UseRenderFeature` for proper URP integration and correct matrix setup
+- Disable `EnableFrustumCulling` if you experience culling issues (may help with matrix-related problems)
 
 ## Platform Notes
 
-### Android/iOS/WebGL
+### VR Platforms
+- **Meta Quest**: Supported via OpenGL ES 3.1 and Vulkan
+  - OpenGL ES 3.1: Uses optimized packed buffer path
+  - Vulkan: Uses full-featured path with Spherical Harmonics
+- **Apple Vision Pro**: Supported via Metal (uses full-featured path with Spherical Harmonics)
+- Both platforms automatically select the correct graphics API (Metal, Vulkan, or OpenGL ES) based on device capabilities
+
+### Android/iOS
 - PLY files must be in `StreamingAssets/GaussianSplatting/`
 - Loading uses `UnityWebRequest` automatically
-- No Editor-time import available
+- Uses OpenGL ES 3.1 graphics API with optimized packed buffer path
 
 ### Desktop (Windows/Mac/Linux)
-- Supports both Editor import and runtime loading
-- Can use direct file paths or StreamingAssets
+- Supports runtime loading from StreamingAssets or URLs
+- Uses Vulkan/Metal/D3D11/D3D12 graphics APIs with full feature set
 
 ## License
 

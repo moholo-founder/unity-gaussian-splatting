@@ -21,7 +21,7 @@ Material:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_Name: GaussianSplatGLES
-  m_Shader: {fileID: 4800000, guid: 8a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d, type: 3}
+  m_Shader: {fileID: 4800000, guid: d6144c485d3fb4376a1248bd2f560011, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords: []
