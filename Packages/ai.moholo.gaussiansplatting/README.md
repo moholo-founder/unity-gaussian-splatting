@@ -9,7 +9,7 @@ A Unity package for rendering Gaussian Splatting point clouds. Supports runtime 
 - **Spherical Harmonics**: Full support for SH coefficients (bands 1-3) on Vulkan/Metal/D3D
 - **URP Integration**: Works with Universal Render Pipeline via Render Features
 - **Automatic API Selection**: Unified shader automatically selects optimal path for Vulkan/Metal/D3D vs GLES 3.1
-- **Cross-Platform**: Supports Windows, Mac, Linux, Android, iOS, and WebGL
+- **Cross-Platform**: Supports Windows, Mac, Linux, Android, and iOS
 
 ## Requirements
 
@@ -61,11 +61,16 @@ The package automatically selects the optimal rendering path based on your devic
    - No SH support (GLES limitation)
    - Automatically selected on GLES 3.1 devices
 
-3. **OpenGL ES 2.0** (Legacy Android)
-   - Falls back to GLES 3.1 path if available
-   - Limited compatibility
-
 **Automatic Selection**: The unified `GaussianSplatting/Gaussian Splat` shader contains SubShaders for each API. Unity automatically selects the correct SubShader based on the device's graphics API - you only need one material that works everywhere!
+
+## Demo Scene
+
+The package includes a demo scene in `Samples~/Demo/`:
+- `DemoScene.unity`: Example scene with GSExample prefab
+- `GSExample.prefab`: Pre-configured Gaussian Splat renderer with sample PLY URL
+- `README.md`: Demo-specific documentation
+
+Import the samples via Unity Package Manager to access the demo scene.
 
 ### URP Setup
 
@@ -141,10 +146,10 @@ The Gaussian Splat shader has these properties:
 
 ## Platform Notes
 
-### Android/iOS/WebGL
+### Android/iOS
 - PLY files must be in `StreamingAssets/GaussianSplatting/`
 - Loading uses `UnityWebRequest` automatically
-- No Editor-time import available
+- Uses OpenGL ES 3.1 graphics API with optimized packed buffer path
 
 ### Desktop (Windows/Mac/Linux)
 - Supports runtime loading from StreamingAssets or URLs
