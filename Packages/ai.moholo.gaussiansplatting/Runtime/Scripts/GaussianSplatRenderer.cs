@@ -141,12 +141,12 @@ namespace GaussianSplatting
         [Range(0.0f, 1.0f)]
         public float FrustumCullMargin = 0.3f;
         
-        [Tooltip("Sort algorithm for GLES. Bitonic is simpler with fewer dispatches, better for very large splat counts. Radix is faster for smaller counts.")]
-        public SortAlgorithm GLESSortAlgorithm = SortAlgorithm.Bitonic;
+        [Tooltip("Sort algorithm. Bitonic is fastest and default - simpler with fewer dispatches, better for very large splat counts. Radix is alternative. None is for testing only - will look wrong.")]
+        public SortAlgorithm SortingAlgorithm = SortAlgorithm.Bitonic;
         
-        [Header("Debug")]
+        [HideInInspector]
         [Tooltip("Log performance metrics every N frames (0 = disabled)")]
-        public int LogPerformanceEveryNFrames = 60;
+        public int LogPerformanceEveryNFrames = 0;
 
         private GraphicsBuffer _order;
         private GraphicsBuffer _centers;
@@ -523,12 +523,12 @@ namespace GaussianSplatting
             
             if (useGLESSorter)
             {
-                if (GLESSortAlgorithm == SortAlgorithm.None)
+                if (SortingAlgorithm == SortAlgorithm.None)
                 {
-                    Debug.Log($"[GaussianSplatRenderer] Sorting DISABLED - fastest but may have visual artifacts (Graphics API: {SystemInfo.graphicsDeviceType})");
+                    Debug.Log($"[GaussianSplatRenderer] Sorting DISABLED - for testing only, will look wrong (Graphics API: {SystemInfo.graphicsDeviceType})");
                     // No sorter needed, identity order will be used
                 }
-                else if (GLESSortAlgorithm == SortAlgorithm.Bitonic)
+                else if (SortingAlgorithm == SortAlgorithm.Bitonic)
                 {
                     var sortShaderBitonic = Resources.Load<ComputeShader>("GaussianSplatBitonicSort");
                     if (sortShaderBitonic != null)
@@ -539,11 +539,11 @@ namespace GaussianSplatting
                     else
                     {
                         Debug.LogWarning("[GaussianSplatRenderer] Could not load GaussianSplatBitonicSort compute shader. Falling back to radix sort.");
-                        GLESSortAlgorithm = SortAlgorithm.Radix;
+                        SortingAlgorithm = SortAlgorithm.Radix;
                     }
                 }
                 
-                if (GLESSortAlgorithm == SortAlgorithm.Radix)
+                if (SortingAlgorithm == SortAlgorithm.Radix)
                 {
                     var sortShaderGLES = Resources.Load<ComputeShader>("GaussianSplatSortGLES");
                     if (sortShaderGLES != null)
@@ -880,7 +880,7 @@ namespace GaussianSplatting
                 var camPosOS = transform.InverseTransformPoint(camera.transform.position);
                 var camDirOS = transform.InverseTransformDirection(camera.transform.forward).normalized;
 
-                if (GLESSortAlgorithm == SortAlgorithm.None && _isUsingGLES)
+                if (SortingAlgorithm == SortAlgorithm.None && _isUsingGLES)
                 {
                     // No sorting - use identity order (fastest, may have visual artifacts)
                     _visibleCount = _count;
@@ -1058,7 +1058,7 @@ namespace GaussianSplatting
                 var camPosOS = transform.InverseTransformPoint(camera.transform.position);
                 var camDirOS = transform.InverseTransformDirection(camera.transform.forward).normalized;
 
-                if (GLESSortAlgorithm == SortAlgorithm.None && _isUsingGLES)
+                if (SortingAlgorithm == SortAlgorithm.None && _isUsingGLES)
                 {
                     // No sorting - use identity order (fastest, may have visual artifacts)
                     _visibleCount = _count;
