@@ -1,0 +1,246 @@
+// Global Bitonic Sort for Gaussian Splatting - OpenGL ES 3.1 Compatible
+// This version performs a complete global sort across all splats.
+
+#pragma kernel CSResetVisibleCount
+#pragma kernel CSCalcDistancesAndLocalSort
+#pragma kernel CSGlobalBitonicPass
+#pragma kernel CSCopySortedIndices
+
+#define WORKGROUP_SIZE 128
+#define ELEMENTS_PER_GROUP (WORKGROUP_SIZE * 2)
+
+// ============================================================================
+// Buffers
+// ============================================================================
+
+StructuredBuffer<float4> _SplatPosCovA;  // xyz=pos, w=cov.xx
+RWStructuredBuffer<uint> _VisibleCount;
+RWStructuredBuffer<uint> _OutputOrder;
+
+// Intermediate buffers for global sorting
+RWStructuredBuffer<uint> _SortKeys;
+RWStructuredBuffer<uint> _SortIndices;
+
+uint _SplatCount;
+uint _PaddedCount;
+float4x4 _MatrixMV;
+float4x4 _MatrixVP;
+float _FrustumCullMargin;
+float3 _CamPos;
+float3 _CamDir;
+
+// Global sort parameters
+uint _K;
+uint _J;
+
+// Shared memory
+groupshared uint gs_Keys[ELEMENTS_PER_GROUP];
+groupshared uint gs_Indices[ELEMENTS_PER_GROUP];
+groupshared uint gs_VisibleCount;
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+// Stable distance calculation (stolen logic from SortWorker)
+uint CalculateStableKey(float3 pos)
+{
+    // Projection onto camera direction
+    float d = dot(pos - _CamPos, _CamDir);
+    
+    // Convert to sortable uint. 
+    // We want FAR objects (large d) to have SMALL keys for ascending sort.
+    // Use a large offset to keep it positive. 
+    // 10000.0 is safe for most scenes.
+    float dist = 10000.0f - d;
+    
+    // Pack into uint. 0xFFFFFFFF is reserved for culled objects.
+    return (uint)(clamp(dist, 0.0f, 20000.0f) * 100000.0f);
+}
+
+// ============================================================================
+// Kernel 0: Reset Visible Count
+// ============================================================================
+[numthreads(1, 1, 1)]
+void CSResetVisibleCount(uint3 id : SV_DispatchThreadID)
+{
+    _VisibleCount[0] = 0;
+}
+
+// ============================================================================
+// Kernel 1: Calculate Distances AND Initial Local Sort
+// ============================================================================
+[numthreads(WORKGROUP_SIZE, 1, 1)]
+void CSCalcDistancesAndLocalSort(uint3 gtid : SV_GroupThreadID, uint3 gid : SV_GroupID)
+{
+    uint tid = gtid.x;
+    uint groupOffset = gid.x * ELEMENTS_PER_GROUP;
+    
+    if (tid == 0)
+        gs_VisibleCount = 0;
+    
+    // Each thread loads 2 elements
+    uint idx0 = groupOffset + tid;
+    uint idx1 = groupOffset + tid + WORKGROUP_SIZE;
+    
+    // Load element 0
+    if (idx0 < _SplatCount)
+    {
+        float3 pos = _SplatPosCovA[idx0].xyz;
+        float3 viewPos = mul(_MatrixMV, float4(pos, 1.0)).xyz;
+        
+        float4 clipPos = mul(_MatrixVP, float4(pos, 1.0));
+        float3 ndc = clipPos.xyz / clipPos.w;
+        float margin = _FrustumCullMargin;
+        float bound = 1.0 + margin;
+        
+        bool outsideFrustum = (ndc.x < -bound || ndc.x > bound ||
+                               ndc.y < -bound || ndc.y > bound ||
+                               ndc.z < -margin || ndc.z > 1.0 + margin ||
+                               viewPos.z > -0.001);
+        
+        if (outsideFrustum)
+            gs_Keys[tid] = 0xFFFFFFFF;
+        else
+        {
+            InterlockedAdd(gs_VisibleCount, 1);
+            gs_Keys[tid] = CalculateStableKey(pos);
+        }
+        gs_Indices[tid] = idx0;
+    }
+    else
+    {
+        gs_Keys[tid] = 0xFFFFFFFF;
+        gs_Indices[tid] = idx0;
+    }
+    
+    // Load element 1
+    if (idx1 < _SplatCount)
+    {
+        float3 pos = _SplatPosCovA[idx1].xyz;
+        float3 viewPos = mul(_MatrixMV, float4(pos, 1.0)).xyz;
+        
+        float4 clipPos = mul(_MatrixVP, float4(pos, 1.0));
+        float3 ndc = clipPos.xyz / clipPos.w;
+        float margin = _FrustumCullMargin;
+        float bound = 1.0 + margin;
+        
+        bool outsideFrustum = (ndc.x < -bound || ndc.x > bound ||
+                               ndc.y < -bound || ndc.y > bound ||
+                               ndc.z < -margin || ndc.z > 1.0 + margin ||
+                               viewPos.z > -0.001);
+        
+        if (outsideFrustum)
+            gs_Keys[tid + WORKGROUP_SIZE] = 0xFFFFFFFF;
+        else
+        {
+            InterlockedAdd(gs_VisibleCount, 1);
+            gs_Keys[tid + WORKGROUP_SIZE] = CalculateStableKey(pos);
+        }
+        gs_Indices[tid + WORKGROUP_SIZE] = idx1;
+    }
+    else
+    {
+        gs_Keys[tid + WORKGROUP_SIZE] = 0xFFFFFFFF;
+        gs_Indices[tid + WORKGROUP_SIZE] = idx1;
+    }
+    
+    GroupMemoryBarrierWithGroupSync();
+    
+    if (tid == 0 && gs_VisibleCount > 0)
+    {
+        InterlockedAdd(_VisibleCount[0], gs_VisibleCount);
+    }
+    
+    // Initial local sort (k = 2 to ELEMENTS_PER_GROUP)
+    for (uint k = 2; k <= ELEMENTS_PER_GROUP; k <<= 1)
+    {
+        for (uint j = k >> 1; j > 0; j >>= 1)
+        {
+            GroupMemoryBarrierWithGroupSync();
+            uint pairId = tid;
+            uint block = pairId / j;
+            uint posInBlock = pairId % j;
+            uint i = block * 2 * j + posInBlock;
+            uint partner = i + j;
+            
+            bool ascending = ((i / k) % 2) == 0;
+            uint keyI = gs_Keys[i];
+            uint keyP = gs_Keys[partner];
+            
+            if (ascending ? (keyI > keyP) : (keyI < keyP))
+            {
+                gs_Keys[i] = keyP;
+                gs_Keys[partner] = keyI;
+                uint idxI = gs_Indices[i];
+                uint idxP = gs_Indices[partner];
+                gs_Indices[i] = idxP;
+                gs_Indices[partner] = idxI;
+            }
+        }
+    }
+    
+    GroupMemoryBarrierWithGroupSync();
+    
+    // Write to intermediate buffers for global steps
+    if (idx0 < _PaddedCount)
+    {
+        _SortKeys[idx0] = gs_Keys[tid];
+        _SortIndices[idx0] = gs_Indices[tid];
+    }
+    if (idx1 < _PaddedCount)
+    {
+        _SortKeys[idx1] = gs_Keys[tid + WORKGROUP_SIZE];
+        _SortIndices[idx1] = gs_Indices[tid + WORKGROUP_SIZE];
+    }
+}
+
+// ============================================================================
+// Kernel 2: Global Bitonic Pass
+// ============================================================================
+[numthreads(WORKGROUP_SIZE, 1, 1)]
+void CSGlobalBitonicPass(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    uint j = _J;
+    uint k = _K;
+    
+    // Each thread handles ONE element and its partner
+    // We only process 'i' where it's the first element of the pair
+    uint block = i / j;
+    uint posInBlock = i % j;
+    uint idxI = block * 2 * j + posInBlock;
+    uint idxP = idxI + j;
+    
+    if (idxP < _PaddedCount)
+    {
+        bool ascending = ((idxI / k) % 2) == 0;
+        
+        uint keyI = _SortKeys[idxI];
+        uint keyP = _SortKeys[idxP];
+        
+        if (ascending ? (keyI > keyP) : (keyI < keyP))
+        {
+            _SortKeys[idxI] = keyP;
+            _SortKeys[idxP] = keyI;
+            
+            uint valI = _SortIndices[idxI];
+            uint valP = _SortIndices[idxP];
+            _SortIndices[idxI] = valP;
+            _SortIndices[idxP] = valI;
+        }
+    }
+}
+
+// ============================================================================
+// Kernel 3: Copy Sorted Indices to Final Output
+// ============================================================================
+[numthreads(WORKGROUP_SIZE, 1, 1)]
+void CSCopySortedIndices(uint3 id : SV_DispatchThreadID)
+{
+    uint idx = id.x;
+    if (idx < _SplatCount)
+    {
+        _OutputOrder[idx] = _SortIndices[idx];
+    }
+}

@@ -115,7 +115,7 @@ The Gaussian Splat shader has these properties:
 
 ## Performance Tips
 
-- Use GPU sorting (enabled by default) for better performance
+- **Use Bitonic GPU Sorting**: For most mobile and desktop scenarios, Bitonic sort is significantly faster and more stable than the default Radix sort. It is now the recommended sorting algorithm for Gaussian Splatting.
 - Adjust `SortEveryNFrames` to reduce sorting overhead
 - Use `MaxSplatsToLoad` to limit splat count for testing
 - Enable `UseRenderFeature` for proper URP integration
