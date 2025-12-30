@@ -861,7 +861,7 @@ namespace GaussianSplatting
             {
                 _firstRenderLogged = true;
                 Debug.Log($"[GS-PERF] First render call! Camera={camera.name}, visible={_visibleCount}/{_count}, material={_activeMaterial?.name}, shader={_activeMaterial?.shader?.name}, mobile={_useMobilePath}");
-                Debug.Log($"[GS-PERF] Viewport: {w}x{h}, Proj00: {camera.projectionMatrix[0,0]}, Proj11: {camera.projectionMatrix[1,1]}");
+                Debug.Log($"[GS-PERF] Viewport: {camera.pixelWidth}x{camera.pixelHeight}, Proj00: {camera.projectionMatrix[0,0]}, Proj11: {camera.projectionMatrix[1,1]}");
             }
             
             // Track frame time
