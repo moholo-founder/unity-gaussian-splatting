@@ -1,0 +1,89 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &7621731109524347326
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 2305386197343695992}
+  - component: {fileID: 8493995070576340840}
+  - component: {fileID: 1516018672048090526}
+  - component: {fileID: 1167433799574837836}
+  m_Layer: 0
+  m_Name: GaussianSplatExample
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &2305386197343695992
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7621731109524347326}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &8493995070576340840
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7621731109524347326}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b2b9050f92109224991332d73c0048bb, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: ai.moholo.gaussiansplatting::GaussianSplatting.GaussianSplatRenderer
+  PlyUrl: 
+  PlyFileName: houseplant.ply
+  Material: {fileID: 2100000, guid: 05a667fb14e1e4a40800cef36518b4c2, type: 2}
+  TargetCamera: {fileID: 0}
+  ScaleMultiplier: 1
+  MaxSplatsToLoad: 0
+  SortEveryNFrames: 1
+  UseRenderFeature: 0
+  EnableFrustumCulling: 1
+  FrustumCullMargin: 0.3
+  SortingAlgorithm: 0
+  LogPerformanceEveryNFrames: 0
+--- !u!114 &1516018672048090526
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7621731109524347326}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ae246901eb2415b4192259f9537b25f0, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: ai.moholo.gaussiansplatting::SimpleRotate
+  rotationSpeed: {x: 0, y: 50, z: 0}
+--- !u!114 &1167433799574837836
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7621731109524347326}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4d5835741d4581c4d9ab6b9b90efa5d7, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::LerpToCamera
+  targetDistance: 1
+  duration: 2
+  targetCamera: {fileID: 0}
+  useCameraForward: 1
