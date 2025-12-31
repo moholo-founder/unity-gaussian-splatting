@@ -1,6 +1,6 @@
 %YAML 1.1
 %TAG !u! tag:unity3d.com,2011:
---- !u!1 &7876918513920170839
+--- !u!1 &594414747561616347
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -8,45 +8,46 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 967883504641396372}
-  - component: {fileID: 3521603421934286984}
-  - component: {fileID: 1567595862523493603}
+  - component: {fileID: 647975118897053722}
+  - component: {fileID: 8586040566303308899}
+  - component: {fileID: 365868754862650713}
+  - component: {fileID: 7633290546616505467}
   m_Layer: 0
-  m_Name: GaussianSplatExample
+  m_Name: GaussianSplatPlayer
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!4 &967883504641396372
+--- !u!4 &647975118897053722
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 7876918513920170839}
+  m_GameObject: {fileID: 594414747561616347}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 3.71}
+  m_LocalPosition: {x: 0, y: 0, z: 1.47}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &3521603421934286984
+--- !u!114 &8586040566303308899
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 7876918513920170839}
+  m_GameObject: {fileID: 594414747561616347}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: b2b9050f92109224991332d73c0048bb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: ai.moholo.gaussiansplatting::GaussianSplatting.GaussianSplatRenderer
   PlyUrl: 
-  PlyFileName: cactus_splat3_30kSteps_719k_splats.ply
+  PlyFileName: plant360k.ply
   Material: {fileID: 2100000, guid: 05a667fb14e1e4a40800cef36518b4c2, type: 2}
   TargetCamera: {fileID: 0}
   ScaleMultiplier: 1
@@ -57,16 +58,28 @@ MonoBehaviour:
   FrustumCullMargin: 0.3
   SortingAlgorithm: 0
   LogPerformanceEveryNFrames: 0
---- !u!114 &1567595862523493603
+--- !u!114 &365868754862650713
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 7876918513920170839}
-  m_Enabled: 1
+  m_GameObject: {fileID: 594414747561616347}
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: ae246901eb2415b4192259f9537b25f0, type: 3}
   m_Name: 
   m_EditorClassIdentifier: ai.moholo.gaussiansplatting::SimpleRotate
   rotationSpeed: {x: 0, y: 50, z: 0}
+--- !u!114 &7633290546616505467
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 594414747561616347}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 28ad7bee53ca14f4a8fa43e74362837e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::GaussianMeshMappingService
