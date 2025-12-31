@@ -171,6 +171,7 @@ namespace GaussianSplatting
 
         private GaussianSplatGPUSorterGLES _gpuSorterGLES;
         private GaussianSplatBitonicSorter _gpuSorterBitonic;
+        private GaussianMeshDeformer _meshDeformer;
         private MaterialPropertyBlock _mpb;
         private GaussianSplatAsset _loadedAsset; // Track which asset is currently loaded
         private Material _activeMaterial; // The material currently in use
@@ -268,6 +269,7 @@ namespace GaussianSplatting
             // Release GPU buffers but keep CPU data
             _gpuSorterGLES?.Dispose(); _gpuSorterGLES = null;
             _gpuSorterBitonic?.Dispose(); _gpuSorterBitonic = null;
+            _meshDeformer?.Dispose(); _meshDeformer = null;
             _order?.Release(); _order = null;
             // Packed buffers
             _glesPosScale?.Release(); _glesPosScale = null;
@@ -309,6 +311,7 @@ namespace GaussianSplatting
         {
             _gpuSorterGLES?.Dispose(); _gpuSorterGLES = null;
             _gpuSorterBitonic?.Dispose(); _gpuSorterBitonic = null;
+            _meshDeformer?.Dispose(); _meshDeformer = null;
             _order?.Release(); _order = null;
             // Packed buffers
             _glesPosScale?.Release(); _glesPosScale = null;
@@ -488,6 +491,79 @@ namespace GaussianSplatting
             Debug.Log($"[GaussianSplatRenderer] World bounds: center={_worldBounds.center}, size={_worldBounds.size}");
             Debug.Log($"[GaussianSplatRenderer] Transform position: {transform.position}, rotation: {transform.rotation.eulerAngles}, scale: {transform.lossyScale}");
         }
+
+        /// <summary>
+        /// Initialize mesh-based deformation for Gaussian splats.
+        /// Call this after the Gaussian data is loaded to enable mesh deformation.
+        /// </summary>
+        /// <param name="mappings">Gaussian to face mappings (use GaussianFaceMapping struct)</param>
+        /// <param name="vertices">Original mesh vertices (rest pose)</param>
+        /// <param name="triangles">Mesh triangle indices (3 per face)</param>
+        /// <returns>True if initialization succeeded</returns>
+        public bool InitializeMeshDeformation(GaussianFaceMapping[] mappings,
+                                               Vector3[] vertices, int[] triangles)
+        {
+            if (_count == 0 || _glesPosScale == null)
+            {
+                Debug.LogError("[GaussianSplatRenderer] Cannot initialize mesh deformation - Gaussians not loaded");
+                return false;
+            }
+            
+            if (mappings.Length != _count)
+            {
+                Debug.LogError($"[GaussianSplatRenderer] Mapping count ({mappings.Length}) doesn't match Gaussian count ({_count})");
+                return false;
+            }
+            
+            int faceCount = triangles.Length / 3;
+            
+            // Load compute shader
+            var deformShader = Resources.Load<ComputeShader>("GaussianMeshDeform");
+            if (deformShader == null)
+            {
+                Debug.LogError("[GaussianSplatRenderer] Could not load GaussianMeshDeform compute shader");
+                return false;
+            }
+            
+            // Dispose existing deformer if any
+            _meshDeformer?.Dispose();
+            
+            // Create new deformer
+            _meshDeformer = new GaussianMeshDeformer(deformShader, _count, faceCount);
+            _meshDeformer.Initialize(mappings, vertices, triangles);
+            
+            // Store original covariance data for proper rotation
+            _meshDeformer.StoreOriginalCovariances(_glesPosScale, _glesRotation, _glesColor);
+            
+            Debug.Log($"[GaussianSplatRenderer] Mesh deformation initialized for {_count} Gaussians, {faceCount} faces");
+            return true;
+        }
+
+        /// <summary>
+        /// Update the mesh state for deformation. Call this when the mesh has been deformed.
+        /// </summary>
+        /// <param name="vertices">Current deformed mesh vertices</param>
+        /// <param name="triangles">Mesh triangle indices (unchanged from original)</param>
+        public void UpdateMeshDeformation(Vector3[] vertices, int[] triangles)
+        {
+            if (_meshDeformer == null || !_meshDeformer.IsInitialized)
+            {
+                Debug.LogWarning("[GaussianSplatRenderer] Mesh deformation not initialized");
+                return;
+            }
+            
+            _meshDeformer.UpdateMeshState(vertices, triangles);
+        }
+
+        /// <summary>
+        /// Whether mesh deformation is enabled and initialized.
+        /// </summary>
+        public bool IsMeshDeformationEnabled => _meshDeformer != null && _meshDeformer.IsInitialized;
+
+        /// <summary>
+        /// Get the position buffer for external access (e.g., for custom deformation).
+        /// </summary>
+        public GraphicsBuffer PositionBuffer => _glesPosScale;
 
         /// <summary>
         /// GPU compute shader path for covariance precomputation.
@@ -880,6 +956,12 @@ namespace GaussianSplatting
             {
                 _sortStopwatch.Restart();
                 
+                // Apply mesh deformation BEFORE sorting (if enabled)
+                if (_meshDeformer != null && _meshDeformer.IsInitialized)
+                {
+                    _meshDeformer.ApplyDeformation(_glesPosScale, _glesRotation, _glesColor);
+                }
+                
                 // transform camera into object space (matches gsplat-instance.js sort path)
                 var camPosOS = transform.InverseTransformPoint(camera.transform.position);
                 var camDirOS = transform.InverseTransformDirection(camera.transform.forward).normalized;
@@ -1033,6 +1115,12 @@ namespace GaussianSplatting
             
             if (shouldSort)
             {
+                // Apply mesh deformation BEFORE sorting (if enabled)
+                if (_meshDeformer != null && _meshDeformer.IsInitialized)
+                {
+                    _meshDeformer.ApplyDeformation(_glesPosScale, _glesRotation, _glesColor);
+                }
+                
                 // transform camera into object space (matches gsplat-instance.js sort path)
                 var camPosOS = transform.InverseTransformPoint(camera.transform.position);
                 var camDirOS = transform.InverseTransformDirection(camera.transform.forward).normalized;

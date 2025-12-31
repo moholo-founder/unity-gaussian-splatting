@@ -371,6 +371,58 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &723641099
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 723641100}
+  - component: {fileID: 723641101}
+  m_Layer: 0
+  m_Name: AnimatedGaussian
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &723641100
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 723641099}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -0, y: 0, z: 1.47}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children:
+  - {fileID: 2301908324001983201}
+  - {fileID: 2305386197527730798}
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &723641101
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 723641099}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::GaussianMeshDeformTest
+  GaussianRenderer: {fileID: 8497411135182107121}
+  GlbRenderer: {fileID: 1135536782}
+  AutoInitialize: 1
+  CoordConversion: 0
+  _isInitialized: 0
+  _statusMessage: Not initialized
 --- !u!1 &748872033
 GameObject:
   m_ObjectHideFlags: 0
@@ -1036,7 +1088,7 @@ PrefabInstance:
   serializedVersion: 2
   m_Modification:
     serializedVersion: 3
-    m_TransformParent: {fileID: 0}
+    m_TransformParent: {fileID: 723641100}
     m_Modifications:
     - target: {fileID: 594414747561616347, guid: aa583510d6f259643a94e4458a521873, type: 3}
       propertyPath: m_Name
@@ -1044,7 +1096,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 647975118897053722, guid: aa583510d6f259643a94e4458a521873, type: 3}
       propertyPath: m_LocalPosition.x
-      value: 0
+      value: -0.42
       objectReference: {fileID: 0}
     - target: {fileID: 647975118897053722, guid: aa583510d6f259643a94e4458a521873, type: 3}
       propertyPath: m_LocalPosition.y
@@ -1052,7 +1104,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 647975118897053722, guid: aa583510d6f259643a94e4458a521873, type: 3}
       propertyPath: m_LocalPosition.z
-      value: 1.47
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 647975118897053722, guid: aa583510d6f259643a94e4458a521873, type: 3}
       propertyPath: m_LocalRotation.w
@@ -1060,15 +1112,15 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 647975118897053722, guid: aa583510d6f259643a94e4458a521873, type: 3}
       propertyPath: m_LocalRotation.x
-      value: 0
+      value: -0
       objectReference: {fileID: 0}
     - target: {fileID: 647975118897053722, guid: aa583510d6f259643a94e4458a521873, type: 3}
       propertyPath: m_LocalRotation.y
-      value: 0
+      value: -0
       objectReference: {fileID: 0}
     - target: {fileID: 647975118897053722, guid: aa583510d6f259643a94e4458a521873, type: 3}
       propertyPath: m_LocalRotation.z
-      value: 0
+      value: -0
       objectReference: {fileID: 0}
     - target: {fileID: 647975118897053722, guid: aa583510d6f259643a94e4458a521873, type: 3}
       propertyPath: m_LocalEulerAnglesHint.x
@@ -1104,6 +1156,11 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: ai.moholo.gaussiansplatting::SimpleRotate
   rotationSpeed: {x: 0, y: 50, z: 0}
+--- !u!4 &2301908324001983201 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: 647975118897053722, guid: aa583510d6f259643a94e4458a521873, type: 3}
+  m_PrefabInstance: {fileID: 403371778985746868}
+  m_PrefabAsset: {fileID: 0}
 --- !u!4 &2305386197527730798
 Transform:
   m_ObjectHideFlags: 0
@@ -1112,12 +1169,12 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 7621731109373933480}
   serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 1, z: 0, w: 0}
-  m_LocalPosition: {x: 0, y: 0, z: 1.47}
+  m_LocalRotation: {x: -0, y: 1, z: -0, w: 0}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
-  m_Father: {fileID: 0}
+  m_Father: {fileID: 723641100}
   m_LocalEulerAnglesHint: {x: 0, y: 180, z: 0}
 --- !u!1 &7621731109373933480
 GameObject:
@@ -1137,15 +1194,25 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
+--- !u!114 &8497411135182107121 stripped
+MonoBehaviour:
+  m_CorrespondingSourceObject: {fileID: 8586040566303308899, guid: aa583510d6f259643a94e4458a521873, type: 3}
+  m_PrefabInstance: {fileID: 403371778985746868}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b2b9050f92109224991332d73c0048bb, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: ai.moholo.gaussiansplatting::GaussianSplatting.GaussianSplatRenderer
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
   m_Roots:
   - {fileID: 807779496}
-  - {fileID: 403371778985746868}
-  - {fileID: 2305386197527730798}
   - {fileID: 432559655}
   - {fileID: 1547447303}
   - {fileID: 1465368437}
   - {fileID: 806138828}
   - {fileID: 153692771}
+  - {fileID: 723641100}

@@ -11,7 +11,7 @@ GameObject:
   - component: {fileID: 647975118897053722}
   - component: {fileID: 8586040566303308899}
   - component: {fileID: 365868754862650713}
-  - component: {fileID: 7633290546616505467}
+  - component: {fileID: 7908166670039466850}
   m_Layer: 0
   m_Name: GaussianSplatPlayer
   m_TagString: Untagged
@@ -71,15 +71,19 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: ai.moholo.gaussiansplatting::SimpleRotate
   rotationSpeed: {x: 0, y: 50, z: 0}
---- !u!114 &7633290546616505467
+--- !u!114 &7908166670039466850
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 594414747561616347}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 28ad7bee53ca14f4a8fa43e74362837e, type: 3}
+  m_Script: {fileID: 11500000, guid: 292c822c1bf63774bb86164ca50b9057, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::GaussianMeshMappingService
+  m_EditorClassIdentifier: Assembly-CSharp::GaussianMeshMappingTrigger
+  plyFolder: GaussianSplatting
+  glbFolder: GLB
+  coordConversion: 0
+  generateOnStart: 1

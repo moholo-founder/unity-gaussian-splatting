@@ -1,0 +1,180 @@
+// Gaussian Mesh Deformation Compute Shader
+// Transforms Gaussian splat positions AND covariances based on mesh face transformations.
+// Each Gaussian is mapped to a mesh face. When the mesh deforms, the Gaussian moves
+// and rotates according to how its associated face has transformed.
+
+#pragma kernel CSDeformGaussians
+
+// ============================================================================
+// Buffers
+// ============================================================================
+
+// Gaussian data (read/write - we modify positions and covariances)
+// Format: xyz=position, w=cov.xx
+RWStructuredBuffer<float4> _SplatPosCovA;
+// Format: cov.xy, cov.xz, cov.yy, cov.yz
+RWStructuredBuffer<float4> _SplatCovB;
+// Format: cov.zz, unused, colorRG, colorBA
+RWStructuredBuffer<float4> _SplatCovCColor;
+
+// Original (rest pose) Gaussian data - needed to properly rotate covariances each frame
+StructuredBuffer<float4> _OriginalPosCovA;
+StructuredBuffer<float4> _OriginalCovB;
+StructuredBuffer<float4> _OriginalCovCColor;
+
+// Mapping data: for each Gaussian, stores (faceId, offset.x, offset.y, offset.z)
+// offset is the local offset from face center to Gaussian in the original/rest pose
+StructuredBuffer<float4> _GaussianFaceMapping;
+
+// Original (rest pose) face data
+StructuredBuffer<float4> _OriginalFaceCenters;  // xyz=center, w=unused
+StructuredBuffer<float4> _OriginalFaceNormals;  // xyz=normal, w=unused
+StructuredBuffer<float4> _OriginalFaceTangents; // xyz=tangent, w=unused
+
+// Current (deformed) face data
+StructuredBuffer<float4> _CurrentFaceCenters;   // xyz=center, w=unused
+StructuredBuffer<float4> _CurrentFaceNormals;   // xyz=normal, w=unused
+StructuredBuffer<float4> _CurrentFaceTangents;  // xyz=tangent, w=unused
+
+// Parameters
+uint _GaussianCount;
+uint _FaceCount;
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+// Build a rotation matrix from two orthonormal frames
+// This computes the rotation that transforms from the original frame to the current frame
+float3x3 ComputeRotationBetweenFrames(
+    float3 origNormal, float3 origTangent,
+    float3 currNormal, float3 currTangent)
+{
+    // Compute bitangent for both frames
+    float3 origBitangent = cross(origNormal, origTangent);
+    float3 currBitangent = cross(currNormal, currTangent);
+    
+    // Original frame matrix (columns are basis vectors)
+    // This transforms from local space to world space in rest pose
+    float3x3 origFrame = float3x3(
+        origTangent.x, origBitangent.x, origNormal.x,
+        origTangent.y, origBitangent.y, origNormal.y,
+        origTangent.z, origBitangent.z, origNormal.z
+    );
+    
+    // Current frame matrix
+    float3x3 currFrame = float3x3(
+        currTangent.x, currBitangent.x, currNormal.x,
+        currTangent.y, currBitangent.y, currNormal.y,
+        currTangent.z, currBitangent.z, currNormal.z
+    );
+    
+    // Inverse of original frame (transpose since it's orthonormal)
+    float3x3 origFrameInv = transpose(origFrame);
+    
+    // Rotation = Current * Inverse(Original)
+    // This takes a point from original world space, converts to local, then to current world space
+    return mul(currFrame, origFrameInv);
+}
+
+// Rotate a symmetric 3x3 covariance matrix: Cov' = R * Cov * R^T
+// Input: 6 unique values of symmetric matrix (xx, xy, xz, yy, yz, zz)
+// Output: 6 unique values of rotated symmetric matrix
+void RotateCovariance(float3x3 R, 
+                      float cov_xx, float cov_xy, float cov_xz, 
+                      float cov_yy, float cov_yz, float cov_zz,
+                      out float out_xx, out float out_xy, out float out_xz,
+                      out float out_yy, out float out_yz, out float out_zz)
+{
+    // Build the full symmetric covariance matrix
+    float3x3 Cov = float3x3(
+        cov_xx, cov_xy, cov_xz,
+        cov_xy, cov_yy, cov_yz,
+        cov_xz, cov_yz, cov_zz
+    );
+    
+    // Compute R * Cov
+    float3x3 RCov = mul(R, Cov);
+    
+    // Compute (R * Cov) * R^T = R * Cov * R^T
+    float3x3 RCovRT = mul(RCov, transpose(R));
+    
+    // Extract the 6 unique values (result is still symmetric)
+    out_xx = RCovRT[0][0];
+    out_xy = RCovRT[0][1];
+    out_xz = RCovRT[0][2];
+    out_yy = RCovRT[1][1];
+    out_yz = RCovRT[1][2];
+    out_zz = RCovRT[2][2];
+}
+
+// ============================================================================
+// Main Kernel
+// ============================================================================
+
+[numthreads(256, 1, 1)]
+void CSDeformGaussians(uint3 id : SV_DispatchThreadID)
+{
+    uint gaussianIdx = id.x;
+    if (gaussianIdx >= _GaussianCount)
+        return;
+    
+    // Load mapping data
+    float4 mappingData = _GaussianFaceMapping[gaussianIdx];
+    uint faceId = (uint)mappingData.x;
+    float3 localOffset = mappingData.yzw;
+    
+    // Bounds check
+    if (faceId >= _FaceCount)
+        return;
+    
+    // Load original face frame
+    float3 origCenter = _OriginalFaceCenters[faceId].xyz;
+    float3 origNormal = normalize(_OriginalFaceNormals[faceId].xyz);
+    float3 origTangent = normalize(_OriginalFaceTangents[faceId].xyz);
+    
+    // Load current face frame
+    float3 currCenter = _CurrentFaceCenters[faceId].xyz;
+    float3 currNormal = normalize(_CurrentFaceNormals[faceId].xyz);
+    float3 currTangent = normalize(_CurrentFaceTangents[faceId].xyz);
+    
+    // Compute rotation between frames
+    float3x3 rotation = ComputeRotationBetweenFrames(
+        origNormal, origTangent,
+        currNormal, currTangent
+    );
+    
+    // ========== POSITION ==========
+    // Transform the offset from original frame to current frame
+    float3 rotatedOffset = mul(rotation, localOffset);
+    
+    // Compute new position: current face center + rotated offset
+    float3 newPosition = currCenter + rotatedOffset;
+    
+    // ========== COVARIANCE ==========
+    // Load ORIGINAL covariance values (not current - we always rotate from rest pose)
+    float4 origPosCovA = _OriginalPosCovA[gaussianIdx];
+    float4 origCovB = _OriginalCovB[gaussianIdx];
+    float4 origCovCColor = _OriginalCovCColor[gaussianIdx];
+    
+    float orig_xx = origPosCovA.w;
+    float orig_xy = origCovB.x;
+    float orig_xz = origCovB.y;
+    float orig_yy = origCovB.z;
+    float orig_yz = origCovB.w;
+    float orig_zz = origCovCColor.x;
+    
+    // Rotate covariance: Cov' = R * Cov * R^T
+    float new_xx, new_xy, new_xz, new_yy, new_yz, new_zz;
+    RotateCovariance(rotation,
+                     orig_xx, orig_xy, orig_xz, orig_yy, orig_yz, orig_zz,
+                     new_xx, new_xy, new_xz, new_yy, new_yz, new_zz);
+    
+    // ========== WRITE OUTPUT ==========
+    // Update position and covariance
+    _SplatPosCovA[gaussianIdx] = float4(newPosition, new_xx);
+    _SplatCovB[gaussianIdx] = float4(new_xy, new_xz, new_yy, new_yz);
+    
+    // Preserve color data (only update cov.zz)
+    _SplatCovCColor[gaussianIdx] = float4(new_zz, origCovCColor.y, origCovCColor.z, origCovCColor.w);
+}
