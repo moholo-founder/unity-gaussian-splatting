@@ -3,13 +3,12 @@ using UnityEditor;
 using UnityEngine;
 
 /// <summary>
-/// Editor menu item to manually trigger mapping generation.
-/// The actual mapping is done automatically at runtime by GaussianMeshMappingService.
+/// Editor menu items for Gaussian-to-mesh mapping utilities.
 /// </summary>
-public static class GaussianToMeshMapperMenu
+public class GaussianMappingEditorUtils
 {
     [MenuItem("Tools/Gaussian Splatting/Open Mapping Folder")]
-    public static void OpenMappingFolder()
+    private static void OpenMappingFolder()
     {
         string path = System.IO.Path.Combine(Application.streamingAssetsPath, "MappingGLB2Gaussian");
         if (!System.IO.Directory.Exists(path))
@@ -20,7 +19,7 @@ public static class GaussianToMeshMapperMenu
     }
     
     [MenuItem("Tools/Gaussian Splatting/Clear All Mappings")]
-    public static void ClearAllMappings()
+    private static void ClearAllMappings()
     {
         string path = System.IO.Path.Combine(Application.streamingAssetsPath, "MappingGLB2Gaussian");
         if (System.IO.Directory.Exists(path))
@@ -32,8 +31,12 @@ public static class GaussianToMeshMapperMenu
                 System.IO.Directory.Delete(path, true);
                 System.IO.Directory.CreateDirectory(path);
                 AssetDatabase.Refresh();
-                Debug.Log("[GaussianToMeshMapper] All mappings cleared.");
+                Debug.Log("[GaussianMappingEditorUtils] All mappings cleared.");
             }
+        }
+        else
+        {
+            Debug.Log("[GaussianMappingEditorUtils] No mapping folder exists yet.");
         }
     }
 }

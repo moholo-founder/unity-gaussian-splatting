@@ -7,13 +7,103 @@ using GLTFast;
 using UnityEngine;
 
 /// <summary>
-/// Service that automatically creates and loads Gaussian-to-mesh mappings.
+/// Add this component to automatically generate Gaussian-to-mesh mappings at runtime.
+/// Place PLY files in StreamingAssets/GaussianSplatting/ and GLB files with the same name.
+/// Mappings will be cached in StreamingAssets/MappingGLB2Gaussian/.
+/// </summary>
+public class GaussianMeshMappingTrigger : MonoBehaviour
+{
+    [Header("Settings")]
+    [Tooltip("Folder containing PLY files (relative to StreamingAssets)")]
+    public string plyFolder = "GaussianSplatting";
+    
+    [Tooltip("Folder containing GLB files (relative to StreamingAssets)")]
+    public string glbFolder = "GLB";
+    
+    [Tooltip("Coordinate conversion for PLY files")]
+    public CoordinateConversion coordConversion = CoordinateConversion.None;
+    
+    [Tooltip("Auto-generate mappings on Start")]
+    public bool generateOnStart = true;
+
+    private void Start()
+    {
+        if (generateOnStart)
+        {
+            GenerateAllMappings();
+        }
+    }
+
+    [ContextMenu("Generate All Mappings")]
+    public void GenerateAllMappings()
+    {
+        StartCoroutine(GenerateAllMappingsCoroutine());
+    }
+
+    private IEnumerator GenerateAllMappingsCoroutine()
+    {
+        string plyFolderPath = Path.Combine(Application.streamingAssetsPath, plyFolder);
+        string glbFolderPath = Path.Combine(Application.streamingAssetsPath, glbFolder);
+        
+        if (!Directory.Exists(plyFolderPath))
+        {
+            Debug.LogWarning($"[GaussianMeshMappingTrigger] PLY folder not found: {plyFolderPath}");
+            yield break;
+        }
+        
+        string[] plyFiles = Directory.GetFiles(plyFolderPath, "*.ply");
+        Debug.Log($"[GaussianMeshMappingTrigger] Found {plyFiles.Length} PLY files");
+        
+        foreach (string plyPath in plyFiles)
+        {
+            string baseName = Path.GetFileNameWithoutExtension(plyPath);
+            string glbPath = Path.Combine(glbFolderPath, baseName + ".glb");
+            
+            // Check if GLB exists
+            if (!File.Exists(glbPath))
+            {
+                Debug.Log($"[GaussianMeshMappingTrigger] No GLB for {baseName}, skipping");
+                continue;
+            }
+            
+            // Check if mapping already exists
+            if (GaussianMeshMappingService.MappingExists(plyPath))
+            {
+                Debug.Log($"[GaussianMeshMappingTrigger] Mapping already exists for {baseName}");
+                continue;
+            }
+            
+            // Generate mapping
+            Debug.Log($"[GaussianMeshMappingTrigger] Generating mapping for {baseName}...");
+            
+            bool done = false;
+            GaussianMeshMappingService.Instance.GetOrCreateMappingAsync(plyPath, glbPath, coordConversion, result =>
+            {
+                if (result.Success)
+                {
+                    Debug.Log($"[GaussianMeshMappingTrigger] Successfully created mapping for {baseName}");
+                }
+                else
+                {
+                    Debug.LogError($"[GaussianMeshMappingTrigger] Failed to create mapping for {baseName}: {result.Error}");
+                }
+                done = true;
+            });
+            
+            // Wait for completion
+            while (!done)
+            {
+                yield return null;
+            }
+        }
+        
+        Debug.Log("[GaussianMeshMappingTrigger] All mappings processed");
+    }
+}
+
+/// <summary>
+/// Service that creates and loads Gaussian-to-mesh mappings.
 /// Mappings are cached in StreamingAssets/MappingGLB2Gaussian/.
-/// 
-/// Usage:
-/// 1. Call GetOrCreateMappingAsync() with PLY and GLB paths
-/// 2. If mapping exists, it's loaded immediately
-/// 3. If not, it's generated at runtime and cached for future use
 /// </summary>
 public class GaussianMeshMappingService : MonoBehaviour
 {
@@ -139,11 +229,22 @@ public class GaussianMeshMappingService : MonoBehaviour
 
     /// <summary>
     /// Gets or creates a mapping. If mapping exists, loads it. Otherwise generates it.
+    /// Uses auto-detected GLB path (same name as PLY in same folder).
+    /// </summary>
+    public void GetOrCreateMappingAsync(string plyPath, CoordinateConversion coordConversion, Action<MappingResult> onComplete)
+    {
+        string glbPath = GetCorrespondingGlbPath(plyPath);
+        GetOrCreateMappingAsync(plyPath, glbPath, coordConversion, onComplete);
+    }
+
+    /// <summary>
+    /// Gets or creates a mapping. If mapping exists, loads it. Otherwise generates it.
     /// </summary>
     /// <param name="plyPath">Full path to PLY file</param>
+    /// <param name="glbPath">Full path to GLB file</param>
     /// <param name="coordConversion">Coordinate conversion for PLY loading</param>
     /// <param name="onComplete">Callback when mapping is ready</param>
-    public void GetOrCreateMappingAsync(string plyPath, CoordinateConversion coordConversion, Action<MappingResult> onComplete)
+    public void GetOrCreateMappingAsync(string plyPath, string glbPath, CoordinateConversion coordConversion, Action<MappingResult> onComplete)
     {
         // Check if mapping already exists
         if (MappingExists(plyPath))
@@ -153,12 +254,11 @@ public class GaussianMeshMappingService : MonoBehaviour
             return;
         }
 
-        // Check if corresponding GLB exists
-        string glbPath = GetCorrespondingGlbPath(plyPath);
+        // Check if GLB exists
         if (!File.Exists(glbPath))
         {
-            Debug.Log($"[GaussianMeshMapping] No corresponding GLB found for {plyPath}, skipping mapping");
-            onComplete?.Invoke(new MappingResult { Success = false, Error = "No corresponding GLB file" });
+            Debug.Log($"[GaussianMeshMapping] GLB not found: {glbPath}");
+            onComplete?.Invoke(new MappingResult { Success = false, Error = "GLB file not found" });
             return;
         }
 
