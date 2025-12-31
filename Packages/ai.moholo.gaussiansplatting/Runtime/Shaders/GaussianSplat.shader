@@ -7,7 +7,8 @@ Shader "GaussianSplatting/Gaussian Splat"
     }
 
     // ============================================================================
-    // SubShader 1: Vulkan, Metal, D3D11/12 - Full feature set with separate buffers
+    // Unified SubShader: Works on ALL platforms (Vulkan, Metal, D3D, GLES)
+    // Uses exactly 4 SSBOs with precomputed covariance for consistency and performance
     // ============================================================================
     SubShader
     {
@@ -22,202 +23,7 @@ Shader "GaussianSplatting/Gaussian Splat"
             Blend One OneMinusSrcAlpha
 
             HLSLPROGRAM
-            #pragma target 4.5
-            #pragma exclude_renderers gles3 gles
-            #pragma vertex Vert
-            #pragma fragment Frag
-
-            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
-
-            struct Attributes { uint vertexID : SV_VertexID; };
-            struct Varyings { float4 positionCS : SV_POSITION; float2 gaussianUV : TEXCOORD0; float4 gaussianColor : TEXCOORD1; };
-
-            StructuredBuffer<uint> _SplatOrder;
-            StructuredBuffer<float3> _Centers;
-            StructuredBuffer<float4> _Rotations;
-            StructuredBuffer<float3> _Scales;
-            StructuredBuffer<float4> _Colors;
-            StructuredBuffer<float3> _SHCoeffs;
-            int _SHBands;
-            int _SHCoeffsPerSplat;
-            uint _NumSplats;
-            float4 _ViewportSize;
-            float _IsOrtho;
-            float _MinAlpha;
-            float4x4 _SplatObjectToWorld;
-            float4x4 _SplatWorldToObject;
-            float _CamProjM00;
-            float _CamProjM11;
-
-            float3x3 QuatToMat3(float4 q)
-            {
-                float w = q.x, x = q.y, y = q.z, z = q.w;
-                return float3x3(
-                    1.0-2.0*(y*y+z*z), 2.0*(x*y-w*z), 2.0*(x*z+w*y),
-                    2.0*(x*y+w*z), 1.0-2.0*(x*x+z*z), 2.0*(y*z-w*x),
-                    2.0*(x*z-w*y), 2.0*(y*z+w*x), 1.0-2.0*(x*x+y*y)
-                );
-            }
-
-            void ComputeCovariance(float4 q, float3 s, out float3 covA, out float3 covB)
-            {
-                float3x3 R = QuatToMat3(normalize(q));
-                float3x3 S = float3x3(s.x,0,0, 0,s.y,0, 0,0,s.z);
-                float3x3 M = mul(R, S);
-                float3x3 V = mul(M, transpose(M));
-                covA = float3(V[0][0], V[0][1], V[0][2]);
-                covB = float3(V[1][1], V[1][2], V[2][2]);
-            }
-
-            bool InitCornerCov(float2 cornerUV, float3 viewPos, float4 centerCS, float proj00, float proj11, float3 covA, float3 covB, out float2 offsetCS, out float2 outUV)
-            {
-                float3x3 Vrk = float3x3(covA.x, covA.y, covA.z, covA.y, covB.x, covB.y, covA.z, covB.y, covB.z);
-                float4x4 modelView = mul(UNITY_MATRIX_V, _SplatObjectToWorld);
-                float3x3 W = (float3x3)modelView;
-                
-                // Use camera's raw projection for focal length (not GPU-adjusted)
-                // If _CamProjM00/_CamProjM11 are set, use them; otherwise fall back to passed values
-                float rawProj00 = _CamProjM00 != 0 ? _CamProjM00 : proj00;
-                float rawProj11 = _CamProjM11 != 0 ? _CamProjM11 : proj11;
-                float focalX = _ViewportSize.x * abs(rawProj00) * 0.5;
-                float focalY = _ViewportSize.y * abs(rawProj11) * 0.5;
-                
-                // Unity view space has negative Z for objects in front - convert to positive depth
-                float z = -viewPos.z;
-                if (z <= 0.001) return false; // Behind or at camera plane
-                float invZ = 1.0 / z;
-                float invZ2 = invZ * invZ;
-
-                // Jacobian for perspective projection
-                float3x3 J = float3x3(
-                    focalX*invZ, 0, focalX*viewPos.x*invZ2,
-                    0, focalY*invZ, focalY*viewPos.y*invZ2,
-                    0, 0, 0
-                );
-
-                // cov2d = J * W * Vrk * W^T * J^T = T * Vrk * T^T where T = J * W
-                float3x3 T = mul(J, W);
-                float3x3 cov2d = mul(T, mul(Vrk, transpose(T)));
-
-                cov2d[0][0] += 0.3;
-                cov2d[1][1] += 0.3;
-
-                float det = cov2d[0][0] * cov2d[1][1] - cov2d[0][1] * cov2d[0][1];
-                if (det <= 0) return false;
-                float mid = 0.5 * (cov2d[0][0] + cov2d[1][1]);
-                float lambda1 = mid + sqrt(max(0.1, mid * mid - det));
-                float lambda2 = max(0.1, mid - sqrt(max(0.1, mid * mid - det)));
-                float radius = ceil(3.0 * sqrt(lambda1));
-                
-                float2 diag = normalize(float2(cov2d[0][1], lambda1 - cov2d[0][0]));
-                if (abs(cov2d[0][1]) < 1e-4) diag = float2(1, 0);
-                
-                float2 v1 = sqrt(lambda1) * diag;
-                float2 v2 = sqrt(lambda2) * float2(diag.y, -diag.x);
-                
-                float2 offset2D = cornerUV.x * v1 * 3.0 + cornerUV.y * v2 * 3.0;
-                // Flip Y if projection matrix has Y flipped (common in Unity render targets)
-                if (proj11 < 0) offset2D.y = -offset2D.y;
-                offsetCS = offset2D * centerCS.w * _ViewportSize.zw * 2.0;
-                outUV = cornerUV * 3.0;
-                return true;
-            }
-
-            static const float SH_C1 = 0.4886025;
-            static const float SH_C2_0 = 1.092548;
-            static const float SH_C2_1 = -1.092548;
-            static const float SH_C2_2 = 0.31539;
-            static const float SH_C2_3 = -1.092548;
-            static const float SH_C2_4 = 0.54627;
-            static const float SH_C3_0 = -0.59004;
-            static const float SH_C3_1 = 2.8906;
-            static const float SH_C3_2 = -0.4570;
-            static const float SH_C3_3 = 0.3731;
-            static const float SH_C3_4 = -0.4570;
-            static const float SH_C3_5 = 1.4453;
-            static const float SH_C3_6 = -0.5900;
-
-            float3 EvalSH(uint id, float3 dir)
-            {
-                if (_SHBands <= 0) return 0;
-                uint b = id * (uint)_SHCoeffsPerSplat;
-                float x=dir.x, y=dir.y, z=dir.z;
-                float3 res = SH_C1 * (-_SHCoeffs[b+0]*y + _SHCoeffs[b+1]*z - _SHCoeffs[b+2]*x);
-                if (_SHBands > 1) {
-                    float xx=x*x, yy=y*y, zz=z*z, xy=x*y, yz=y*z, xz=x*z;
-                    res += _SHCoeffs[b+3]*(SH_C2_0*xy) + _SHCoeffs[b+4]*(SH_C2_1*yz) + _SHCoeffs[b+5]*(SH_C2_2*(2*zz-xx-yy)) + _SHCoeffs[b+6]*(SH_C2_3*xz) + _SHCoeffs[b+7]*(SH_C2_4*(xx-yy));
-                    if (_SHBands > 2) {
-                        res += _SHCoeffs[b+8]*(SH_C3_0*y*(3*xx-yy)) + _SHCoeffs[b+9]*(SH_C3_1*xy*z) + _SHCoeffs[b+10]*(SH_C3_2*y*(4*zz-xx-yy)) + _SHCoeffs[b+11]*(SH_C3_3*z*(2*zz-3*xx-3*yy)) + _SHCoeffs[b+12]*(SH_C3_4*x*(4*zz-xx-yy)) + _SHCoeffs[b+13]*(SH_C3_5*z*(xx-yy)) + _SHCoeffs[b+14]*(SH_C3_6*x*(xx-3*yy));
-                    }
-                }
-                return res;
-            }
-
-            float NormExp(float x) { return exp(-0.5 * x); }
-
-            Varyings Vert(Attributes IN)
-            {
-                Varyings OUT;
-                uint idx = IN.vertexID / 6u;
-                uint vidx = IN.vertexID % 6u;
-                if (idx >= _NumSplats) { OUT.positionCS = 0; return OUT; }
-                float2 uv = float2(vidx==1||vidx==2||vidx==4?1:-1, vidx==2||vidx==4||vidx==5?1:-1);
-                uint id = _SplatOrder[idx];
-                float3 p = _Centers[id];
-                float4 r = _Rotations[id];
-                float3 s = _Scales[id];
-                float4 c = _Colors[id];
-                float3 wp = mul(_SplatObjectToWorld, float4(p, 1.0)).xyz;
-                float3 vp = mul(UNITY_MATRIX_V, float4(wp, 1.0)).xyz;
-                float4 cp = mul(UNITY_MATRIX_P, float4(vp, 1.0));
-                
-                float3 ca, cb;
-                // Use default quaternion interpretation: q = (w, x, y, z)
-                float4 q = float4(r.w, r.x, r.y, r.z);
-                ComputeCovariance(q, s, ca, cb);
-                float2 off; float2 guv;
-                if (!InitCornerCov(uv, vp, cp, UNITY_MATRIX_P[0][0], UNITY_MATRIX_P[1][1], ca, cb, off, guv)) { OUT.positionCS=0; return OUT; }
-                OUT.positionCS = cp + float4(off, 0, 0);
-                OUT.gaussianUV = guv;
-                if (_SHBands>0) {
-                    float3 dir = normalize(wp - _WorldSpaceCameraPos);
-                    c.rgb += EvalSH(id, mul((float3x3)_SplatWorldToObject, dir));
-                }
-                OUT.gaussianColor = float4(max(c.rgb, 0), c.a);
-                return OUT;
-            }
-
-            float4 Frag(Varyings IN) : SV_Target
-            {
-                float d2 = dot(IN.gaussianUV, IN.gaussianUV);
-                if (d2 > 9.0) discard;
-                float alpha = exp(-0.5 * d2) * IN.gaussianColor.a;
-                if (alpha < _MinAlpha) discard;
-                return float4(IN.gaussianColor.rgb * alpha, alpha);
-            }
-            ENDHLSL
-        }
-    }
-
-    // ============================================================================
-    // SubShader 2: OpenGL ES 3.1 - Packed buffers with precomputed covariance
-    // Uses exactly 4 SSBOs for GLES 3.1 strict compatibility
-    // ============================================================================
-    SubShader
-    {
-        Tags { "Queue"="Transparent" "RenderType"="Transparent" "IgnoreProjector"="True" }
-
-        Pass
-        {
-            Name "GaussianSplatGLES"
-            Tags { "LightMode"="SRPDefaultUnlit" }
-
-            Cull Off ZWrite Off ZTest LEqual
-            Blend One OneMinusSrcAlpha
-
-            HLSLPROGRAM
             #pragma target 3.5
-            #pragma only_renderers gles3
             #pragma vertex Vert
             #pragma fragment Frag
 
@@ -226,15 +32,13 @@ Shader "GaussianSplatting/Gaussian Splat"
             struct Attributes { uint vertexID : SV_VertexID; };
             struct Varyings { float4 positionCS : SV_POSITION; float2 gaussianUV : TEXCOORD0; float4 gaussianColor : TEXCOORD1; };
 
-            // Exactly 4 SSBOs for GLES 3.1 strict compatibility
+            // Exactly 4 SSBOs - works on ALL platforms including GLES 3.1
             // OPTIMIZED: Precomputed 3D covariance eliminates per-vertex matrix computation
             StructuredBuffer<uint> _SplatOrder;                  // SSBO 0: sort indices
             StructuredBuffer<float4> _SplatPosCovA;              // SSBO 1: pos.xyz, cov3d.xx
             StructuredBuffer<float4> _SplatCovB;                 // SSBO 2: cov3d.xy, cov3d.xz, cov3d.yy, cov3d.yz
             StructuredBuffer<float4> _SplatCovCColor;            // SSBO 3: cov3d.zz, unused, colorRG_packed, colorBA_packed
             
-            int _SHBands;
-            int _SHCoeffsPerSplat;
             uint _NumSplats;
             float4 _ViewportSize;
             float _IsOrtho;
@@ -252,9 +56,6 @@ Shader "GaussianSplatting/Gaussian Splat"
                 uint hy = bits >> 16;
                 return float2(f16tof32(hx), f16tof32(hy));
             }
-
-            // NOTE: QuatToMat3 and ComputeCovariance removed - 3D covariance is now PRECOMPUTED on CPU!
-            // This saves significant per-vertex computation (quaternion normalization, matrix multiply, etc.)
 
             bool InitCornerCov(float2 cornerUV, float3 viewPos, float4 centerCS, float proj00, float proj11, float3 covA, float3 covB, out float2 offsetCS, out float2 outUV)
             {
@@ -289,7 +90,6 @@ Shader "GaussianSplatting/Gaussian Splat"
                 float mid = 0.5 * (cov2d[0][0] + cov2d[1][1]);
                 float lambda1 = mid + sqrt(max(0.1, mid * mid - det));
                 float lambda2 = max(0.1, mid - sqrt(max(0.1, mid * mid - det)));
-                float radius = ceil(3.0 * sqrt(lambda1));
                 
                 float2 diag = normalize(float2(cov2d[0][1], lambda1 - cov2d[0][0]));
                 if (abs(cov2d[0][1]) < 1e-4) diag = float2(1, 0);
