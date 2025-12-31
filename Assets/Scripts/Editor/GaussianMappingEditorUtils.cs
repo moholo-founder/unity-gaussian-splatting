@@ -2,9 +2,6 @@
 using UnityEditor;
 using UnityEngine;
 
-/// <summary>
-/// Editor menu items for Gaussian-to-mesh mapping utilities.
-/// </summary>
 public class GaussianMappingEditorUtils
 {
     [MenuItem("Tools/Gaussian Splatting/Open Mapping Folder")]
@@ -41,3 +38,4 @@ public class GaussianMappingEditorUtils
     }
 }
 #endif
+
