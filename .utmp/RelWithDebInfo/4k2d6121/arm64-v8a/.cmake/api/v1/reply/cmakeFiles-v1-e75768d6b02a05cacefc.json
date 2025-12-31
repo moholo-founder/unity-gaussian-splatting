@@ -41,7 +41,7 @@
 		},
 		{
 			"isGenerated" : true,
-			"path" : "D:/HalfABridge/VulcanAndGLES/.utmp/RelWithDebInfo/4x664l3y/arm64-v8a/CMakeFiles/3.22.1-g37088a8-dirty/CMakeSystem.cmake"
+			"path" : "D:/HalfABridge/CrossPlatformUnityGaussianSplatting/.utmp/RelWithDebInfo/4k2d6121/arm64-v8a/CMakeFiles/3.22.1-g37088a8-dirty/CMakeSystem.cmake"
 		},
 		{
 			"isExternal" : true,
@@ -307,7 +307,7 @@
 		},
 		{
 			"isGenerated" : true,
-			"path" : "D:/HalfABridge/VulcanAndGLES/.utmp/RelWithDebInfo/4x664l3y/arm64-v8a/CMakeFiles/3.22.1-g37088a8-dirty/CMakeCCompiler.cmake"
+			"path" : "D:/HalfABridge/CrossPlatformUnityGaussianSplatting/.utmp/RelWithDebInfo/4k2d6121/arm64-v8a/CMakeFiles/3.22.1-g37088a8-dirty/CMakeCCompiler.cmake"
 		},
 		{
 			"isCMake" : true,
@@ -541,7 +541,7 @@
 		},
 		{
 			"isGenerated" : true,
-			"path" : "D:/HalfABridge/VulcanAndGLES/.utmp/RelWithDebInfo/4x664l3y/arm64-v8a/CMakeFiles/3.22.1-g37088a8-dirty/CMakeCXXCompiler.cmake"
+			"path" : "D:/HalfABridge/CrossPlatformUnityGaussianSplatting/.utmp/RelWithDebInfo/4k2d6121/arm64-v8a/CMakeFiles/3.22.1-g37088a8-dirty/CMakeCXXCompiler.cmake"
 		},
 		{
 			"isCMake" : true,
@@ -692,7 +692,7 @@
 		},
 		{
 			"isGenerated" : true,
-			"path" : "D:/HalfABridge/VulcanAndGLES/.utmp/RelWithDebInfo/4x664l3y/arm64-v8a/CMakeFiles/3.22.1-g37088a8-dirty/CMakeCCompiler.cmake"
+			"path" : "D:/HalfABridge/CrossPlatformUnityGaussianSplatting/.utmp/RelWithDebInfo/4k2d6121/arm64-v8a/CMakeFiles/3.22.1-g37088a8-dirty/CMakeCCompiler.cmake"
 		},
 		{
 			"isCMake" : true,
@@ -786,28 +786,28 @@
 		},
 		{
 			"isGenerated" : true,
-			"path" : "D:/HalfABridge/VulcanAndGLES/.utmp/RelWithDebInfo/4x664l3y/arm64-v8a/CMakeFiles/3.22.1-g37088a8-dirty/CMakeCXXCompiler.cmake"
+			"path" : "D:/HalfABridge/CrossPlatformUnityGaussianSplatting/.utmp/RelWithDebInfo/4k2d6121/arm64-v8a/CMakeFiles/3.22.1-g37088a8-dirty/CMakeCXXCompiler.cmake"
 		},
 		{
 			"path" : "GameActivity/CMakeLists.txt"
 		},
 		{
 			"isExternal" : true,
-			"path" : "D:/HalfABridge/VulcanAndGLES/.utmp/RelWithDebInfo/4x664l3y/prefab/arm64-v8a/prefab/lib/aarch64-linux-android/cmake/game-activity/game-activityConfig.cmake"
+			"path" : "D:/HalfABridge/CrossPlatformUnityGaussianSplatting/.utmp/RelWithDebInfo/4k2d6121/prefab/arm64-v8a/prefab/lib/aarch64-linux-android/cmake/game-activity/game-activityConfig.cmake"
 		},
 		{
 			"path" : "FramePacing/CMakeLists.txt"
 		},
 		{
 			"isExternal" : true,
-			"path" : "D:/HalfABridge/VulcanAndGLES/.utmp/RelWithDebInfo/4x664l3y/prefab/arm64-v8a/prefab/lib/aarch64-linux-android/cmake/games-frame-pacing/games-frame-pacingConfig.cmake"
+			"path" : "D:/HalfABridge/CrossPlatformUnityGaussianSplatting/.utmp/RelWithDebInfo/4k2d6121/prefab/arm64-v8a/prefab/lib/aarch64-linux-android/cmake/games-frame-pacing/games-frame-pacingConfig.cmake"
 		}
 	],
 	"kind" : "cmakeFiles",
 	"paths" : 
 	{
-		"build" : "D:/HalfABridge/VulcanAndGLES/.utmp/RelWithDebInfo/4x664l3y/arm64-v8a",
-		"source" : "D:/HalfABridge/VulcanAndGLES/Library/Bee/Android/Prj/IL2CPP/Gradle/unityLibrary/src/main/cpp"
+		"build" : "D:/HalfABridge/CrossPlatformUnityGaussianSplatting/.utmp/RelWithDebInfo/4k2d6121/arm64-v8a",
+		"source" : "D:/HalfABridge/CrossPlatformUnityGaussianSplatting/Library/Bee/Android/Prj/IL2CPP/Gradle/unityLibrary/src/main/cpp"
 	},
 	"version" : 
 	{

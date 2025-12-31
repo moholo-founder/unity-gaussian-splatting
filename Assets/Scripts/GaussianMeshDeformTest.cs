@@ -127,6 +127,8 @@ public class GaussianMeshDeformTest : MonoBehaviour
         
         // Load or create mapping
         string plyPath = GetPlyPath();
+        string glbPath = GetGlbPath();
+        
         if (string.IsNullOrEmpty(plyPath))
         {
             _statusMessage = "Error: Could not determine PLY path";
@@ -134,9 +136,19 @@ public class GaussianMeshDeformTest : MonoBehaviour
             return;
         }
         
+        if (string.IsNullOrEmpty(glbPath))
+        {
+            _statusMessage = "Error: Could not determine GLB path";
+            Debug.LogError("[GaussianMeshDeformTest] Could not determine GLB path");
+            return;
+        }
+        
+        Debug.Log($"[GaussianMeshDeformTest] PLY path: {plyPath}");
+        Debug.Log($"[GaussianMeshDeformTest] GLB path: {glbPath}");
+        
         _statusMessage = "Loading/creating mapping...";
         
-        GaussianMeshMappingService.Instance.GetOrCreateMappingAsync(plyPath, CoordConversion, OnMappingReady);
+        GaussianMeshMappingService.Instance.GetOrCreateMappingAsync(plyPath, glbPath, CoordConversion, OnMappingReady);
     }
     
     private void OnMappingReady(GaussianMeshMappingService.MappingResult result)
@@ -211,6 +223,21 @@ public class GaussianMeshDeformTest : MonoBehaviour
         }
         
         return null;
+    }
+    
+    private string GetGlbPath()
+    {
+        // GLB files are in StreamingAssets/GLB/ folder
+        // Get base name from PLY filename and look for corresponding GLB
+        string plyFileName = GaussianRenderer.PlyFileName;
+        if (string.IsNullOrEmpty(plyFileName))
+            return null;
+            
+        string baseName = System.IO.Path.GetFileNameWithoutExtension(plyFileName);
+        return System.IO.Path.Combine(
+            Application.streamingAssetsPath,
+            "GLB",
+            baseName + ".glb");
     }
     
     private void OnDestroy()

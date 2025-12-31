@@ -175,7 +175,7 @@
 				}
 			],
 			"type" : "INTERNAL",
-			"value" : "d:/HalfABridge/UnityAndroid/.utmp/RelWithDebInfo/544v5g1p/arm64-v8a"
+			"value" : "d:/HalfABridge/CrossPlatformUnityGaussianSplatting/.utmp/RelWithDebInfo/4k2d6121/arm64-v8a"
 		},
 		{
 			"name" : "CMAKE_CACHE_MAJOR_VERSION",
@@ -679,7 +679,7 @@
 				}
 			],
 			"type" : "UNINITIALIZED",
-			"value" : "D:\\HalfABridge\\UnityAndroid\\.utmp\\RelWithDebInfo\\544v5g1p\\prefab\\arm64-v8a\\prefab"
+			"value" : "D:\\HalfABridge\\CrossPlatformUnityGaussianSplatting\\.utmp\\RelWithDebInfo\\4k2d6121\\prefab\\arm64-v8a\\prefab"
 		},
 		{
 			"name" : "CMAKE_GENERATOR",
@@ -739,7 +739,7 @@
 				}
 			],
 			"type" : "INTERNAL",
-			"value" : "D:/HalfABridge/UnityAndroid/Library/Bee/Android/Prj/IL2CPP/Gradle/unityLibrary/src/main/cpp"
+			"value" : "D:/HalfABridge/CrossPlatformUnityGaussianSplatting/Library/Bee/Android/Prj/IL2CPP/Gradle/unityLibrary/src/main/cpp"
 		},
 		{
 			"name" : "CMAKE_INSTALL_PREFIX",
@@ -775,7 +775,7 @@
 				}
 			],
 			"type" : "UNINITIALIZED",
-			"value" : "D:\\HalfABridge\\UnityAndroid\\Library\\Bee\\Android\\Prj\\IL2CPP\\Gradle\\unityLibrary\\build\\intermediates\\cxx\\RelWithDebInfo\\544v5g1p\\obj\\arm64-v8a"
+			"value" : "D:\\HalfABridge\\CrossPlatformUnityGaussianSplatting\\Library\\Bee\\Android\\Prj\\IL2CPP\\Gradle\\unityLibrary\\build\\intermediates\\cxx\\RelWithDebInfo\\4k2d6121\\obj\\arm64-v8a"
 		},
 		{
 			"name" : "CMAKE_LINKER",
@@ -1047,7 +1047,7 @@
 				}
 			],
 			"type" : "UNINITIALIZED",
-			"value" : "D:\\HalfABridge\\UnityAndroid\\Library\\Bee\\Android\\Prj\\IL2CPP\\Gradle\\unityLibrary\\build\\intermediates\\cxx\\RelWithDebInfo\\544v5g1p\\obj\\arm64-v8a"
+			"value" : "D:\\HalfABridge\\CrossPlatformUnityGaussianSplatting\\Library\\Bee\\Android\\Prj\\IL2CPP\\Gradle\\unityLibrary\\build\\intermediates\\cxx\\RelWithDebInfo\\4k2d6121\\obj\\arm64-v8a"
 		},
 		{
 			"name" : "CMAKE_SHARED_LINKER_FLAGS",
@@ -1319,7 +1319,7 @@
 				}
 			],
 			"type" : "STATIC",
-			"value" : "D:/HalfABridge/UnityAndroid/.utmp/RelWithDebInfo/544v5g1p/arm64-v8a"
+			"value" : "D:/HalfABridge/CrossPlatformUnityGaussianSplatting/.utmp/RelWithDebInfo/4k2d6121/arm64-v8a"
 		},
 		{
 			"name" : "Unity_IS_TOP_LEVEL",
@@ -1343,7 +1343,7 @@
 				}
 			],
 			"type" : "STATIC",
-			"value" : "D:/HalfABridge/UnityAndroid/Library/Bee/Android/Prj/IL2CPP/Gradle/unityLibrary/src/main/cpp"
+			"value" : "D:/HalfABridge/CrossPlatformUnityGaussianSplatting/Library/Bee/Android/Prj/IL2CPP/Gradle/unityLibrary/src/main/cpp"
 		},
 		{
 			"name" : "game-activity_DIR",
@@ -1355,7 +1355,7 @@
 				}
 			],
 			"type" : "PATH",
-			"value" : "D:/HalfABridge/UnityAndroid/.utmp/RelWithDebInfo/544v5g1p/prefab/arm64-v8a/prefab/lib/aarch64-linux-android/cmake/game-activity"
+			"value" : "D:/HalfABridge/CrossPlatformUnityGaussianSplatting/.utmp/RelWithDebInfo/4k2d6121/prefab/arm64-v8a/prefab/lib/aarch64-linux-android/cmake/game-activity"
 		},
 		{
 			"name" : "game_BINARY_DIR",
@@ -1367,7 +1367,7 @@
 				}
 			],
 			"type" : "STATIC",
-			"value" : "D:/HalfABridge/UnityAndroid/.utmp/RelWithDebInfo/544v5g1p/arm64-v8a/GameActivity"
+			"value" : "D:/HalfABridge/CrossPlatformUnityGaussianSplatting/.utmp/RelWithDebInfo/4k2d6121/arm64-v8a/GameActivity"
 		},
 		{
 			"name" : "game_IS_TOP_LEVEL",
@@ -1403,7 +1403,7 @@
 				}
 			],
 			"type" : "STATIC",
-			"value" : "D:/HalfABridge/UnityAndroid/Library/Bee/Android/Prj/IL2CPP/Gradle/unityLibrary/src/main/cpp/GameActivity"
+			"value" : "D:/HalfABridge/CrossPlatformUnityGaussianSplatting/Library/Bee/Android/Prj/IL2CPP/Gradle/unityLibrary/src/main/cpp/GameActivity"
 		},
 		{
 			"name" : "games-frame-pacing_DIR",
@@ -1415,7 +1415,7 @@
 				}
 			],
 			"type" : "PATH",
-			"value" : "D:/HalfABridge/UnityAndroid/.utmp/RelWithDebInfo/544v5g1p/prefab/arm64-v8a/prefab/lib/aarch64-linux-android/cmake/games-frame-pacing"
+			"value" : "D:/HalfABridge/CrossPlatformUnityGaussianSplatting/.utmp/RelWithDebInfo/4k2d6121/prefab/arm64-v8a/prefab/lib/aarch64-linux-android/cmake/games-frame-pacing"
 		},
 		{
 			"name" : "swappywrapper_BINARY_DIR",
@@ -1427,7 +1427,7 @@
 				}
 			],
 			"type" : "STATIC",
-			"value" : "D:/HalfABridge/UnityAndroid/.utmp/RelWithDebInfo/544v5g1p/arm64-v8a/FramePacing"
+			"value" : "D:/HalfABridge/CrossPlatformUnityGaussianSplatting/.utmp/RelWithDebInfo/4k2d6121/arm64-v8a/FramePacing"
 		},
 		{
 			"name" : "swappywrapper_IS_TOP_LEVEL",
@@ -1463,7 +1463,7 @@
 				}
 			],
 			"type" : "STATIC",
-			"value" : "D:/HalfABridge/UnityAndroid/Library/Bee/Android/Prj/IL2CPP/Gradle/unityLibrary/src/main/cpp/FramePacing"
+			"value" : "D:/HalfABridge/CrossPlatformUnityGaussianSplatting/Library/Bee/Android/Prj/IL2CPP/Gradle/unityLibrary/src/main/cpp/FramePacing"
 		}
 	],
 	"kind" : "cache",

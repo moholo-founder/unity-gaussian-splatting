@@ -87,7 +87,7 @@ public class GaussianMeshMappingService : MonoBehaviour
     }
 
     /// <summary>
-    /// Loads an existing mapping from disk.
+    /// Loads an existing mapping from disk (synchronous - Editor/Desktop only).
     /// </summary>
     public static MappingResult LoadMapping(string plyPath)
     {
@@ -100,8 +100,59 @@ public class GaussianMeshMappingService : MonoBehaviour
 
         try
         {
-            using (var fs = new FileStream(mappingPath, FileMode.Open, FileAccess.Read))
-            using (var br = new BinaryReader(fs))
+            byte[] data = File.ReadAllBytes(mappingPath);
+            return ParseMappingData(data, mappingPath);
+        }
+        catch (Exception ex)
+        {
+            return new MappingResult { Success = false, Error = ex.Message };
+        }
+    }
+    
+    /// <summary>
+    /// Loads an existing mapping asynchronously (works on Android with StreamingAssets).
+    /// </summary>
+    public void LoadMappingAsync(string plyPath, Action<MappingResult> onComplete)
+    {
+        StartCoroutine(LoadMappingCoroutine(plyPath, onComplete));
+    }
+    
+    private IEnumerator LoadMappingCoroutine(string plyPath, Action<MappingResult> onComplete)
+    {
+        string mappingPath = GetMappingPath(plyPath);
+        
+        // On Android, StreamingAssets requires UnityWebRequest
+        if (Application.platform == RuntimePlatform.Android || mappingPath.Contains("://"))
+        {
+            using (var request = UnityEngine.Networking.UnityWebRequest.Get(mappingPath))
+            {
+                yield return request.SendWebRequest();
+                
+                if (request.result != UnityEngine.Networking.UnityWebRequest.Result.Success)
+                {
+                    onComplete?.Invoke(new MappingResult { Success = false, Error = $"Failed to load mapping: {request.error}" });
+                    yield break;
+                }
+                
+                byte[] data = request.downloadHandler.data;
+                var result = ParseMappingData(data, mappingPath);
+                onComplete?.Invoke(result);
+            }
+        }
+        else
+        {
+            // Desktop/Editor - use synchronous loading
+            var result = LoadMapping(plyPath);
+            onComplete?.Invoke(result);
+        }
+    }
+    
+    private static MappingResult ParseMappingData(byte[] data, string sourcePath)
+    {
+        try
+        {
+            using (var ms = new MemoryStream(data))
+            using (var br = new BinaryReader(ms))
             {
                 int gaussianCount = br.ReadInt32();
                 int faceCount = br.ReadInt32();
@@ -116,7 +167,7 @@ public class GaussianMeshMappingService : MonoBehaviour
                     };
                 }
                 
-                Debug.Log($"[GaussianMeshMapping] Loaded mapping for {gaussianCount} Gaussians from {mappingPath}");
+                Debug.Log($"[GaussianMeshMapping] Loaded mapping for {gaussianCount} Gaussians from {sourcePath}");
                 
                 return new MappingResult
                 {
@@ -151,7 +202,27 @@ public class GaussianMeshMappingService : MonoBehaviour
     /// <param name="onComplete">Callback when mapping is ready</param>
     public void GetOrCreateMappingAsync(string plyPath, string glbPath, CoordinateConversion coordConversion, Action<MappingResult> onComplete)
     {
-        // Check if mapping already exists
+        // On Android/mobile, always try to load pre-generated mapping first
+        // (we can't generate mappings at runtime on Android due to file access limitations)
+        if (Application.platform == RuntimePlatform.Android || Application.platform == RuntimePlatform.IPhonePlayer)
+        {
+            LoadMappingAsync(plyPath, (result) =>
+            {
+                if (result.Success)
+                {
+                    onComplete?.Invoke(result);
+                }
+                else
+                {
+                    Debug.LogError($"[GaussianMeshMapping] Pre-generated mapping not found for Android. " +
+                                   $"Please generate the mapping in the Editor first. Error: {result.Error}");
+                    onComplete?.Invoke(new MappingResult { Success = false, Error = "Mapping must be pre-generated for mobile platforms" });
+                }
+            });
+            return;
+        }
+        
+        // Desktop/Editor: Check if mapping already exists
         if (MappingExists(plyPath))
         {
             var result = LoadMapping(plyPath);
