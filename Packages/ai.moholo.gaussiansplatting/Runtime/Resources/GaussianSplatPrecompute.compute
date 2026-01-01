@@ -108,3 +108,4 @@ void CSPrecomputeCovariance(uint3 id : SV_DispatchThreadID)
     _OutCovCColor[idx] = float4(v22, 0.0, asfloat(colorRG), asfloat(colorBA));
 }
 
+

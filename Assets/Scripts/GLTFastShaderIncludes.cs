@@ -12,3 +12,4 @@ public class GLTFastShaderIncludes : ScriptableObject
     public Material[] materials;
 }
 
+
