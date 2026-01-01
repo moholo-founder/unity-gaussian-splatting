@@ -4,11 +4,11 @@ using UnityEngine;
 namespace GaussianSplatting
 {
     /// <summary>
-    /// GPU-based sorting for gaussian splats using compute shaders.
+    /// GPU-based radix sorting for gaussian splats using compute shaders.
     /// OpenGL ES compatible implementation - does NOT use wave intrinsics.
-    /// Uses a simple radix sort based on VkRadixSort.
+    /// Based on VkRadixSort by Mirco Werner.
     /// </summary>
-    public sealed class GaussianSplatGPUSorterGLES : IDisposable
+    public sealed class GaussianSplatRadixSorter : IDisposable
     {
         private readonly ComputeShader _sortShader;
         private readonly int _calcDistancesKernel;
@@ -39,7 +39,7 @@ namespace GaussianSplatting
         private Vector3 _lastCamDir;
         private const float Epsilon = 0.001f;
 
-        public GaussianSplatGPUSorterGLES(ComputeShader sortShader, int splatCount)
+        public GaussianSplatRadixSorter(ComputeShader sortShader, int splatCount)
         {
             _sortShader = sortShader;
             _splatCount = splatCount;
@@ -70,7 +70,7 @@ namespace GaussianSplatting
             _lastCamDir = new Vector3(float.NaN, 0, 0);
             _lastVisibleCount = splatCount;  // Start with all visible
 
-            Debug.Log($"[GaussianSplatGPUSorterGLES] Initialized for {splatCount} splats, {numWorkgroups} workgroups. Frustum culling with async readback enabled.");
+            Debug.Log($"[GaussianSplatRadixSorter] Initialized for {splatCount} splats, {numWorkgroups} workgroups. Frustum culling with async readback enabled.");
         }
 
         public void Dispose()
@@ -212,11 +212,14 @@ namespace GaussianSplatting
 
         /// <summary>
         /// Sort splats back-to-front (legacy overload without frustum culling).
+        /// Uses a very large frustum margin to effectively disable culling while still sorting correctly.
         /// </summary>
-        public bool Sort(GraphicsBuffer posBuffer, GraphicsBuffer orderBuffer, Matrix4x4 viewMatrix, Vector3 camPosOS, Vector3 camDirOS)
+        public bool Sort(GraphicsBuffer posBuffer, GraphicsBuffer orderBuffer, Matrix4x4 modelViewMatrix, Vector3 camPosOS, Vector3 camDirOS)
         {
-            // Call full version with default frustum margin and discard visible count
-            return Sort(posBuffer, orderBuffer, viewMatrix, viewMatrix, camPosOS, camDirOS, 0.5f, out _);
+            // Pass identity as viewProjMatrix with huge margin - this effectively disables frustum culling
+            // while still running the sort. The margin of 1000 means NDC bounds are [-1001, 1001] which
+            // will include everything.
+            return Sort(posBuffer, orderBuffer, modelViewMatrix, Matrix4x4.identity, camPosOS, camDirOS, 1000f, out _);
         }
 
         public void ForceUpdate()

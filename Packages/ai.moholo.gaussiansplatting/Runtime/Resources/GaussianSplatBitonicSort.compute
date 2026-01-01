@@ -42,7 +42,7 @@ groupshared uint gs_VisibleCount;
 // Helper Functions
 // ============================================================================
 
-// Stable distance calculation (stolen logic from SortWorker)
+// Stable distance calculation for back-to-front sorting
 uint CalculateStableKey(float3 pos)
 {
     // Projection onto camera direction
@@ -87,17 +87,32 @@ void CSCalcDistancesAndLocalSort(uint3 gtid : SV_GroupThreadID, uint3 gid : SV_G
     if (idx0 < _SplatCount)
     {
         float3 pos = _SplatPosCovA[idx0].xyz;
-        float3 viewPos = mul(_MatrixMV, float4(pos, 1.0)).xyz;
         
-        float4 clipPos = mul(_MatrixVP, float4(pos, 1.0));
-        float3 ndc = clipPos.xyz / clipPos.w;
-        float margin = _FrustumCullMargin;
-        float bound = 1.0 + margin;
+        // Only cull if margin is less than a huge value (i.e., frustum culling is actually enabled)
+        // When margin >= 100, we skip culling entirely to avoid any precision issues
+        bool outsideFrustum = false;
         
-        bool outsideFrustum = (ndc.x < -bound || ndc.x > bound ||
-                               ndc.y < -bound || ndc.y > bound ||
-                               ndc.z < -margin || ndc.z > 1.0 + margin ||
-                               viewPos.z > -0.001);
+        if (_FrustumCullMargin < 100.0)
+        {
+            float3 viewPos = mul(_MatrixMV, float4(pos, 1.0)).xyz;
+            
+            // Only cull objects that are clearly behind the camera
+            if (viewPos.z > 0.0)
+            {
+                outsideFrustum = true;
+            }
+            else
+            {
+                // Frustum check using clip space
+                float4 clipPos = mul(_MatrixVP, float4(pos, 1.0));
+                float margin = _FrustumCullMargin;
+                float w = max(abs(clipPos.w), 0.1);
+                float wMargin = w * (1.0 + margin);
+                
+                outsideFrustum = (clipPos.x < -wMargin || clipPos.x > wMargin ||
+                                  clipPos.y < -wMargin || clipPos.y > wMargin);
+            }
+        }
         
         if (outsideFrustum)
             gs_Keys[tid] = 0xFFFFFFFF;
@@ -118,17 +133,28 @@ void CSCalcDistancesAndLocalSort(uint3 gtid : SV_GroupThreadID, uint3 gid : SV_G
     if (idx1 < _SplatCount)
     {
         float3 pos = _SplatPosCovA[idx1].xyz;
-        float3 viewPos = mul(_MatrixMV, float4(pos, 1.0)).xyz;
         
-        float4 clipPos = mul(_MatrixVP, float4(pos, 1.0));
-        float3 ndc = clipPos.xyz / clipPos.w;
-        float margin = _FrustumCullMargin;
-        float bound = 1.0 + margin;
+        bool outsideFrustum = false;
         
-        bool outsideFrustum = (ndc.x < -bound || ndc.x > bound ||
-                               ndc.y < -bound || ndc.y > bound ||
-                               ndc.z < -margin || ndc.z > 1.0 + margin ||
-                               viewPos.z > -0.001);
+        if (_FrustumCullMargin < 100.0)
+        {
+            float3 viewPos = mul(_MatrixMV, float4(pos, 1.0)).xyz;
+            
+            if (viewPos.z > 0.0)
+            {
+                outsideFrustum = true;
+            }
+            else
+            {
+                float4 clipPos = mul(_MatrixVP, float4(pos, 1.0));
+                float margin = _FrustumCullMargin;
+                float w = max(abs(clipPos.w), 0.1);
+                float wMargin = w * (1.0 + margin);
+                
+                outsideFrustum = (clipPos.x < -wMargin || clipPos.x > wMargin ||
+                                  clipPos.y < -wMargin || clipPos.y > wMargin);
+            }
+        }
         
         if (outsideFrustum)
             gs_Keys[tid + WORKGROUP_SIZE] = 0xFFFFFFFF;

@@ -170,11 +170,15 @@ namespace GaussianSplatting
 
         /// <summary>
         /// Sort without frustum culling (legacy overload).
+        /// Uses a very large frustum margin to effectively disable culling while still sorting correctly.
         /// </summary>
-        public bool Sort(GraphicsBuffer posBuffer, GraphicsBuffer orderBuffer, Matrix4x4 viewMatrix, 
+        public bool Sort(GraphicsBuffer posBuffer, GraphicsBuffer orderBuffer, Matrix4x4 modelViewMatrix, 
                         Vector3 camPosOS, Vector3 camDirOS)
         {
-            return Sort(posBuffer, orderBuffer, viewMatrix, viewMatrix, camPosOS, camDirOS, 0.5f, out _);
+            // Pass identity as viewProjMatrix with huge margin - this effectively disables frustum culling
+            // while still running the sort. The margin of 1000 means NDC bounds are [-1001, 1001] which
+            // will include everything.
+            return Sort(posBuffer, orderBuffer, modelViewMatrix, Matrix4x4.identity, camPosOS, camDirOS, 1000f, out _);
         }
 
         public void ForceUpdate()

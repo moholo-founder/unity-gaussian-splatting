@@ -181,7 +181,7 @@ namespace GaussianSplatting
         {
             public GraphicsBuffer OrderBuffer;
             public GaussianSplatBitonicSorter BitonicSorter;
-            public GaussianSplatGPUSorterGLES GlesSorter;
+            public GaussianSplatRadixSorter RadixSorter;
             public int VisibleCount;
             public int LastFrameUsed;
             
@@ -189,7 +189,7 @@ namespace GaussianSplatting
             {
                 OrderBuffer?.Release();
                 BitonicSorter?.Dispose();
-                GlesSorter?.Dispose();
+                RadixSorter?.Dispose();
             }
         }
         private Dictionary<Camera, CameraRenderState> _cameraStates = new Dictionary<Camera, CameraRenderState>();
@@ -494,10 +494,10 @@ namespace GaussianSplatting
             }
             else if (SortingAlgorithm == SortAlgorithm.Radix)
             {
-                var sortShader = Resources.Load<ComputeShader>("GaussianSplatSortGLES");
+                var sortShader = Resources.Load<ComputeShader>("GaussianSplatRadixSort");
                 if (sortShader != null)
                 {
-                    state.GlesSorter = new GaussianSplatGPUSorterGLES(sortShader, _count);
+                    state.RadixSorter = new GaussianSplatRadixSorter(sortShader, _count);
                 }
             }
             
@@ -1039,7 +1039,7 @@ namespace GaussianSplatting
                         camState.VisibleCount = _count;
                     }
                 }
-                else if (camState.GlesSorter != null)
+                else if (camState.RadixSorter != null)
                 {
                     // Radix sort path (per-camera sorter)
                     Matrix4x4 sortModelMatrix = transform.localToWorldMatrix;
@@ -1049,14 +1049,14 @@ namespace GaussianSplatting
                     if (EnableFrustumCulling)
                     {
                         Matrix4x4 viewProjMatrix = camera.projectionMatrix * sortViewMatrix * sortModelMatrix;
-                        if (camState.GlesSorter.Sort(_glesPosScale, camState.OrderBuffer, modelViewMatrix, viewProjMatrix, camPosOS, camDirOS, FrustumCullMargin, out int visible))
+                        if (camState.RadixSorter.Sort(_glesPosScale, camState.OrderBuffer, modelViewMatrix, viewProjMatrix, camPosOS, camDirOS, FrustumCullMargin, out int visible))
                         {
                             camState.VisibleCount = visible;
                         }
                     }
                     else
                     {
-                        camState.GlesSorter.Sort(_glesPosScale, camState.OrderBuffer, modelViewMatrix, camPosOS, camDirOS);
+                        camState.RadixSorter.Sort(_glesPosScale, camState.OrderBuffer, modelViewMatrix, camPosOS, camDirOS);
                         camState.VisibleCount = _count;
                     }
                 }
@@ -1067,12 +1067,11 @@ namespace GaussianSplatting
                 _avgSortTimeMs = Mathf.Lerp(_avgSortTimeMs, _lastSortTimeMs, 0.1f);
             }
             
-            // Safety check: ensure we have splats to draw
-            int visibleCount = camState.VisibleCount;
-            if (visibleCount <= 0)
-            {
-                visibleCount = _count;
-            }
+            // Always draw all splats - culled ones are sorted to the end with max key
+            // and will be clipped by the GPU. This avoids flickering from async visible count latency.
+            // The VisibleCount is still tracked for performance logging purposes.
+            int visibleCount = _count;
+            int reportedVisible = camState.VisibleCount > 0 ? camState.VisibleCount : _count;
             
             // Performance logging (CommandBuffer path)
             if (LogPerformanceEveryNFrames > 0)
@@ -1082,8 +1081,8 @@ namespace GaussianSplatting
                 {
                     _perfLogCounter = 0;
                     float fps = _avgFrameTimeMs > 0 ? 1000f / _avgFrameTimeMs : 0;
-                    float cullPercent = _count > 0 ? (1f - (float)visibleCount / _count) * 100f : 0;
-                    Debug.Log($"[GS-PERF] FPS: {fps:F1} | Frame: {_avgFrameTimeMs:F1}ms | Sort: {_avgSortTimeMs:F2}ms | Visible: {visibleCount}/{_count} ({cullPercent:F0}% culled) | Vertices: {visibleCount * 6}");
+                    float cullPercent = _count > 0 ? (1f - (float)reportedVisible / _count) * 100f : 0;
+                    Debug.Log($"[GS-PERF] FPS: {fps:F1} | Frame: {_avgFrameTimeMs:F1}ms | Sort: {_avgSortTimeMs:F2}ms | Visible: {reportedVisible}/{_count} ({cullPercent:F0}% culled) | Vertices: {visibleCount * 6}");
                 }
             }
 
@@ -1209,7 +1208,7 @@ namespace GaussianSplatting
                         camState.VisibleCount = _count;
                     }
                 }
-                else if (camState.GlesSorter != null)
+                else if (camState.RadixSorter != null)
                 {
                     // Radix sort path (per-camera sorter)
                     Matrix4x4 sortModelMatrix = transform.localToWorldMatrix;
@@ -1219,26 +1218,24 @@ namespace GaussianSplatting
                     if (EnableFrustumCulling)
                     {
                         Matrix4x4 viewProjMatrix = camera.projectionMatrix * sortViewMatrix * sortModelMatrix;
-                        if (camState.GlesSorter.Sort(_glesPosScale, camState.OrderBuffer, modelViewMatrix, viewProjMatrix, camPosOS, camDirOS, FrustumCullMargin, out int visible))
+                        if (camState.RadixSorter.Sort(_glesPosScale, camState.OrderBuffer, modelViewMatrix, viewProjMatrix, camPosOS, camDirOS, FrustumCullMargin, out int visible))
                         {
                             camState.VisibleCount = visible;
                         }
                     }
                     else
                     {
-                        camState.GlesSorter.Sort(_glesPosScale, camState.OrderBuffer, modelViewMatrix, camPosOS, camDirOS);
+                        camState.RadixSorter.Sort(_glesPosScale, camState.OrderBuffer, modelViewMatrix, camPosOS, camDirOS);
                         camState.VisibleCount = _count;
                     }
                 }
                 // No CPU fallback - if no GPU sorter, identity order is used
             }
 
-            // Safety check: ensure we have splats to draw
-            int visibleCount = camState.VisibleCount;
-            if (visibleCount <= 0)
-            {
-                visibleCount = _count;
-            }
+            // Always draw all splats - culled ones are sorted to the end with max key
+            // and will be clipped by the GPU. This avoids flickering from async visible count latency.
+            int visibleCount = _count;
+            int reportedVisible = camState.VisibleCount > 0 ? camState.VisibleCount : _count;
 
             float w = camera.pixelWidth;
             float h = camera.pixelHeight;
@@ -1279,8 +1276,8 @@ namespace GaussianSplatting
                 {
                     _perfLogCounter = 0;
                     float fps = _avgFrameTimeMs > 0 ? 1000f / _avgFrameTimeMs : 0;
-                    float cullPercent = _count > 0 ? (1f - (float)visibleCount / _count) * 100f : 0;
-                    Debug.Log($"[GS-PERF] FPS: {fps:F1} | Frame: {_avgFrameTimeMs:F1}ms | Visible: {visibleCount}/{_count} ({cullPercent:F0}% culled) | Vertices: {visibleCount * 6}");
+                    float cullPercent = _count > 0 ? (1f - (float)reportedVisible / _count) * 100f : 0;
+                    Debug.Log($"[GS-PERF] FPS: {fps:F1} | Frame: {_avgFrameTimeMs:F1}ms | Visible: {reportedVisible}/{_count} ({cullPercent:F0}% culled) | Vertices: {visibleCount * 6}");
                 }
             }
         }

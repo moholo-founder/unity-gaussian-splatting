@@ -1,6 +1,6 @@
-// OpenGL ES Compatible Radix Sort for Gaussian Splatting
+// Radix Sort for Gaussian Splatting
 // Based on VkRadixSort by Mirco Werner: https://github.com/MircoWerner/VkRadixSort
-// This implementation does NOT use wave intrinsics, making it compatible with OpenGL ES 3.1+
+// Compatible with OpenGL ES 3.1+ and Vulkan - does NOT use wave intrinsics
 
 #pragma kernel CSCalcDistances
 #pragma kernel CSHistogram
@@ -122,29 +122,32 @@ void CSCalcDistances(uint3 id : SV_DispatchThreadID)
     float3 pos = _SplatPosCovA[origIdx].xyz;
     float3 viewPos = mul(_MatrixMV, float4(pos, 1.0)).xyz;
     
-    // FRUSTUM CULLING: Check if splat is within view frustum
-    // Transform to clip space for NDC check
-    float4 clipPos = mul(_MatrixVP, float4(pos, 1.0));
+    // First check: is it behind the camera? (viewPos.z > 0 in Unity view space)
+    // This is the most reliable check for near-camera objects
+    bool behindCamera = viewPos.z > 0.0;
     
-    // Perspective divide to get NDC coordinates
-    float3 ndc = clipPos.xyz / clipPos.w;
+    bool outsideFrustum = behindCamera;
     
-    // Frustum bounds with margin (NDC is -1 to 1)
-    float margin = _FrustumCullMargin;
-    float bound = 1.0 + margin;
-    
-    // Check if outside frustum (with margin for gaussian extent)
-    // Also check near plane (viewPos.z should be negative in Unity view space for visible objects)
-    bool outsideFrustum = (ndc.x < -bound || ndc.x > bound ||
-                           ndc.y < -bound || ndc.y > bound ||
-                           ndc.z < -margin || ndc.z > 1.0 + margin ||
-                           viewPos.z > -0.001);  // Behind camera
+    if (!behindCamera)
+    {
+        // Only do frustum check if object is in front of camera
+        // Use clip-space test to avoid division issues when w is small
+        float4 clipPos = mul(_MatrixVP, float4(pos, 1.0));
+        
+        float margin = _FrustumCullMargin;
+        // For very close objects, w can be small. Use larger minimum threshold
+        // to prevent precision issues that cause flickering near the camera
+        float w = max(clipPos.w, 0.1);
+        float wMargin = w * (1.0 + margin);
+        
+        outsideFrustum = (clipPos.x < -wMargin || clipPos.x > wMargin ||
+                          clipPos.y < -wMargin || clipPos.y > wMargin);
+    }
     
     if (outsideFrustum)
     {
         // Mark culled splats with maximum distance (will be sorted to end)
-        // Using positive infinity ensures they sort after all visible splats
-        _SortKeys[idx] = 0xFFFFFFFF;  // Maximum uint = sorted to end (ascending sort)
+        _SortKeys[idx] = 0xFFFFFFFF;
     }
     else
     {
