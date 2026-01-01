@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using UnityEngine;
@@ -148,8 +149,6 @@ namespace GaussianSplatting
         [Tooltip("Log performance metrics every N frames (0 = disabled)")]
         public int LogPerformanceEveryNFrames = 0;
 
-        private GraphicsBuffer _order;
-        
         // Packed buffers (4 SSBOs - works on ALL platforms: Vulkan, Metal, D3D, GLES)
         private GraphicsBuffer _glesPosScale;    // float4: pos.xyz, cov.xx
         private GraphicsBuffer _glesRotation;    // float4: cov.xy, cov.xz, cov.yy, cov.yz
@@ -158,19 +157,10 @@ namespace GaussianSplatting
         private uint[] _orderCpu = Array.Empty<uint>();
         private Vector3[] _centersCpu = Array.Empty<Vector3>();
         private int _count;
-        private int _visibleCount;
 
-        // scratch buffers for sorting (similar to gsplat-sort-worker.js)
-        private uint[] _distances = Array.Empty<uint>();
-        private uint[] _countBuffer = Array.Empty<uint>();
-
-        private Vector3 _lastCamPos;
-        private Vector3 _lastCamDir;
         private Bounds _localBounds;
         private Bounds _worldBounds;
 
-        private GaussianSplatGPUSorterGLES _gpuSorterGLES;
-        private GaussianSplatBitonicSorter _gpuSorterBitonic;
         private GaussianMeshDeformer _meshDeformer;
         private MaterialPropertyBlock _mpb;
         private GaussianSplatAsset _loadedAsset; // Track which asset is currently loaded
@@ -185,6 +175,25 @@ namespace GaussianSplatting
         private bool _needsReload = false; // Set to true after deserialization to force buffer reload
         
         private int _frameCounter = 0; // Track frames for sort frequency
+        
+        // Per-camera rendering state (needed because Scene View and Game View can render simultaneously)
+        private class CameraRenderState
+        {
+            public GraphicsBuffer OrderBuffer;
+            public GaussianSplatBitonicSorter BitonicSorter;
+            public GaussianSplatGPUSorterGLES GlesSorter;
+            public int VisibleCount;
+            public int LastFrameUsed;
+            
+            public void Dispose()
+            {
+                OrderBuffer?.Release();
+                BitonicSorter?.Dispose();
+                GlesSorter?.Dispose();
+            }
+        }
+        private Dictionary<Camera, CameraRenderState> _cameraStates = new Dictionary<Camera, CameraRenderState>();
+        private const int CAMERA_STATE_EXPIRY_FRAMES = 300; // Clean up unused camera states after 5 seconds at 60fps
         
         // Performance tracking
         private float _lastSortTimeMs = 0f;
@@ -267,10 +276,13 @@ namespace GaussianSplatting
         private void ReleaseBuffersOnly()
         {
             // Release GPU buffers but keep CPU data
-            _gpuSorterGLES?.Dispose(); _gpuSorterGLES = null;
-            _gpuSorterBitonic?.Dispose(); _gpuSorterBitonic = null;
+            foreach (var state in _cameraStates.Values)
+            {
+                state.Dispose();
+            }
+            _cameraStates.Clear();
+            
             _meshDeformer?.Dispose(); _meshDeformer = null;
-            _order?.Release(); _order = null;
             // Packed buffers
             _glesPosScale?.Release(); _glesPosScale = null;
             _glesRotation?.Release(); _glesRotation = null;
@@ -309,10 +321,14 @@ namespace GaussianSplatting
 
         private void Release()
         {
-            _gpuSorterGLES?.Dispose(); _gpuSorterGLES = null;
-            _gpuSorterBitonic?.Dispose(); _gpuSorterBitonic = null;
+            // Release per-camera states
+            foreach (var state in _cameraStates.Values)
+            {
+                state.Dispose();
+            }
+            _cameraStates.Clear();
+            
             _meshDeformer?.Dispose(); _meshDeformer = null;
-            _order?.Release(); _order = null;
             // Packed buffers
             _glesPosScale?.Release(); _glesPosScale = null;
             _glesRotation?.Release(); _glesRotation = null;
@@ -320,10 +336,7 @@ namespace GaussianSplatting
             
             _orderCpu = Array.Empty<uint>();
             _centersCpu = Array.Empty<Vector3>();
-            _distances = Array.Empty<uint>();
-            _countBuffer = Array.Empty<uint>();
             _count = 0;
-            _visibleCount = 0;
             _localBounds = new Bounds(Vector3.zero, Vector3.zero);
             _worldBounds = new Bounds(Vector3.zero, Vector3.zero);
             _loadedAsset = null;
@@ -359,7 +372,7 @@ namespace GaussianSplatting
 
             // Force reload if deserialization occurred (e.g., after scene save/load)
             // or if buffers don't exist or asset changed
-            bool needsReload = _needsReload || _order == null || _loadedAsset != PlyAsset || _count == 0;
+            bool needsReload = _needsReload || _glesPosScale == null || _loadedAsset != PlyAsset || _count == 0;
             
             if (!needsReload)
             {
@@ -389,14 +402,10 @@ namespace GaussianSplatting
             }
 
             _count = count;
-            _visibleCount = _count;
 
             _centersCpu = centers;
             _orderCpu = new uint[_count];
             for (uint i = 0; i < _orderCpu.Length; i++) _orderCpu[i] = i;
-
-            _order = new GraphicsBuffer(GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.CopyDestination, _count, sizeof(uint));
-            _order.SetData(_orderCpu);
             
             // Apply scale multiplier
             for (int i = 0; i < scales.Length; i++)
@@ -412,12 +421,12 @@ namespace GaussianSplatting
             // 3D covariance is a symmetric 3x3 matrix = 6 unique values (xx, xy, xz, yy, yz, zz)
             //
             // Packing scheme (4 SSBOs total):
-            // Buffer 0: _SplatOrder (uint) - sort indices
+            // Buffer 0: _SplatOrder (uint) - sort indices (per-camera)
             // Buffer 1: _SplatPosCovA (float4) - pos.xyz, cov.xx
             // Buffer 2: _SplatCovB (float4) - cov.xy, cov.xz, cov.yy, cov.yz
             // Buffer 3: _SplatCovCColor (float4) - cov.zz, unused, packHalf(color.rg), packHalf(color.ba)
             
-            // Create output buffers
+            // Create output buffers (shared across cameras - only order buffer is per-camera)
             _glesPosScale = new GraphicsBuffer(GraphicsBuffer.Target.Structured, _count, sizeof(float) * 4);
             _glesRotation = new GraphicsBuffer(GraphicsBuffer.Target.Structured, _count, sizeof(float) * 4);
             _glesColor = new GraphicsBuffer(GraphicsBuffer.Target.Structured, _count, sizeof(float) * 4);
@@ -435,61 +444,95 @@ namespace GaussianSplatting
                 // CPU path: better for small splat counts or platforms without compute
                 PrecomputeCovarianceCPU(centers, rotations, scales, colors);
             }
-            
-            _activeMaterial.SetBuffer("_SplatOrder", _order);
-            _activeMaterial.SetBuffer("_SplatPosCovA", _glesPosScale);
-            _activeMaterial.SetBuffer("_SplatCovB", _glesRotation);
-            _activeMaterial.SetBuffer("_SplatCovCColor", _glesColor);
-
-            _lastCamPos = new Vector3(float.NaN, 0, 0);
-            _lastCamDir = new Vector3(float.NaN, 0, 0);
 
             _localBounds = ComputeLocalBounds(_centersCpu);
             _worldBounds = TransformBounds(_localBounds, transform.localToWorldMatrix);
 
-            // Create GPU sorter - all platforms now use the same packed buffer layout
-            // Use Bitonic or Radix sort based on user preference
-            if (SortingAlgorithm == SortAlgorithm.None)
-            {
-                Debug.Log($"[GaussianSplatRenderer] Sorting DISABLED - for testing only, will look wrong (Graphics API: {SystemInfo.graphicsDeviceType})");
-                // No sorter needed, identity order will be used
-            }
-            else if (SortingAlgorithm == SortAlgorithm.Bitonic)
-            {
-                var sortShaderBitonic = Resources.Load<ComputeShader>("GaussianSplatBitonicSort");
-                if (sortShaderBitonic != null)
-                {
-                    _gpuSorterBitonic = new GaussianSplatBitonicSorter(sortShaderBitonic, _count);
-                    Debug.Log($"[GaussianSplatRenderer] Using BITONIC sort (Graphics API: {SystemInfo.graphicsDeviceType})");
-                }
-                else
-                {
-                    Debug.LogWarning("[GaussianSplatRenderer] Could not load GaussianSplatBitonicSort compute shader. Falling back to radix sort.");
-                    SortingAlgorithm = SortAlgorithm.Radix;
-                }
-            }
-            
-            if (SortingAlgorithm == SortAlgorithm.Radix)
-            {
-                var sortShaderGLES = Resources.Load<ComputeShader>("GaussianSplatSortGLES");
-                if (sortShaderGLES != null)
-                {
-                    _gpuSorterGLES = new GaussianSplatGPUSorterGLES(sortShaderGLES, _count);
-                    Debug.Log($"[GaussianSplatRenderer] Using RADIX sort (Graphics API: {SystemInfo.graphicsDeviceType})");
-                }
-                else
-                {
-                    Debug.LogWarning("[GaussianSplatRenderer] Could not load GaussianSplatSortGLES compute shader.");
-                }
-            }
+            // Per-camera sorters and order buffers are created on-demand in GetOrCreateCameraState()
+            // This allows Scene View and Game View to have independent sorting/culling
             
             // Reset frame counter to ensure first frame sorts
             _frameCounter = 0;
             
-            Debug.Log($"[GaussianSplatRenderer] TryLoad: completed! GPU buffers created for {_count} splats. Material={_activeMaterial.name}, _order valid={_order != null}");
+            Debug.Log($"[GaussianSplatRenderer] TryLoad: completed! GPU buffers created for {_count} splats. Material={_activeMaterial.name}");
             Debug.Log($"[GaussianSplatRenderer] Local bounds: center={_localBounds.center}, size={_localBounds.size}");
             Debug.Log($"[GaussianSplatRenderer] World bounds: center={_worldBounds.center}, size={_worldBounds.size}");
             Debug.Log($"[GaussianSplatRenderer] Transform position: {transform.position}, rotation: {transform.rotation.eulerAngles}, scale: {transform.lossyScale}");
+        }
+
+        /// <summary>
+        /// Get or create per-camera rendering state (order buffer, sorter, visible count).
+        /// This allows Scene View and Game View to have independent sorting and frustum culling.
+        /// </summary>
+        private CameraRenderState GetOrCreateCameraState(Camera camera)
+        {
+            if (_cameraStates.TryGetValue(camera, out var state))
+            {
+                state.LastFrameUsed = Time.frameCount;
+                return state;
+            }
+            
+            // Create new state for this camera
+            state = new CameraRenderState
+            {
+                OrderBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.CopyDestination, _count, sizeof(uint)),
+                VisibleCount = _count,
+                LastFrameUsed = Time.frameCount
+            };
+            
+            // Initialize order buffer with identity
+            state.OrderBuffer.SetData(_orderCpu);
+            
+            // Create sorter based on algorithm preference
+            if (SortingAlgorithm == SortAlgorithm.Bitonic)
+            {
+                var sortShader = Resources.Load<ComputeShader>("GaussianSplatBitonicSort");
+                if (sortShader != null)
+                {
+                    state.BitonicSorter = new GaussianSplatBitonicSorter(sortShader, _count);
+                }
+            }
+            else if (SortingAlgorithm == SortAlgorithm.Radix)
+            {
+                var sortShader = Resources.Load<ComputeShader>("GaussianSplatSortGLES");
+                if (sortShader != null)
+                {
+                    state.GlesSorter = new GaussianSplatGPUSorterGLES(sortShader, _count);
+                }
+            }
+            
+            _cameraStates[camera] = state;
+            Debug.Log($"[GaussianSplatRenderer] Created per-camera state for '{camera.name}' (type: {camera.cameraType})");
+            
+            // Clean up old unused camera states
+            CleanupUnusedCameraStates();
+            
+            return state;
+        }
+        
+        /// <summary>
+        /// Remove camera states that haven't been used recently (e.g., closed Scene Views).
+        /// </summary>
+        private void CleanupUnusedCameraStates()
+        {
+            var toRemove = new List<Camera>();
+            int currentFrame = Time.frameCount;
+            
+            foreach (var kvp in _cameraStates)
+            {
+                // Remove if camera is null (destroyed) or hasn't been used recently
+                if (kvp.Key == null || (currentFrame - kvp.Value.LastFrameUsed) > CAMERA_STATE_EXPIRY_FRAMES)
+                {
+                    kvp.Value.Dispose();
+                    toRemove.Add(kvp.Key);
+                }
+            }
+            
+            foreach (var cam in toRemove)
+            {
+                _cameraStates.Remove(cam);
+                Debug.Log($"[GaussianSplatRenderer] Cleaned up unused camera state");
+            }
         }
 
         /// <summary>
@@ -834,7 +877,7 @@ namespace GaussianSplatting
             }
             
             // Lazy reload if data was released (e.g., after scene save in editor)
-            if ((_needsReload || _order == null) && PlyAsset != null && Material != null)
+            if ((_needsReload || _glesPosScale == null) && PlyAsset != null && Material != null)
                 TryLoad();
             
             if (!enabled)
@@ -847,7 +890,7 @@ namespace GaussianSplatting
                 Debug.LogWarning($"[GaussianSplatRenderer] Skipping render - Material is null. Camera: {camera.name}");
                 return;
             }
-            if (_order == null)
+            if (_glesPosScale == null)
             {
                 Debug.LogWarning($"[GaussianSplatRenderer] Skipping render - GPU buffers not initialized. Camera: {camera.name}");
                 return;
@@ -877,7 +920,7 @@ namespace GaussianSplatting
         {
             // Built-in RP fallback
             if (GraphicsSettings.currentRenderPipeline != null) return;
-            if (!enabled || _activeMaterial == null || _order == null || _count == 0) return;
+            if (!enabled || _activeMaterial == null || _glesPosScale == null || _count == 0) return;
 
             var camera = Camera.current;
             if (camera == null) return;
@@ -895,10 +938,10 @@ namespace GaussianSplatting
         public void RenderWithCommandBuffer(CommandBuffer cmd, Camera camera)
         {
             // Lazy reload if data was released (e.g., after scene save in editor)
-            if ((_needsReload || _order == null) && PlyAsset != null && Material != null)
+            if ((_needsReload || _glesPosScale == null) && PlyAsset != null && Material != null)
                 TryLoad();
             
-            if (!enabled || _activeMaterial == null || _order == null || _count == 0) return;
+            if (!enabled || _activeMaterial == null || _glesPosScale == null || _count == 0) return;
             
             // Scene view handling - always draw
             if (camera.cameraType != CameraType.SceneView)
@@ -917,10 +960,10 @@ namespace GaussianSplatting
         public void RenderWithRasterCommandBuffer(RasterCommandBuffer cmd, Camera camera)
         {
             // Lazy reload if data was released (e.g., after scene save in editor)
-            if ((_needsReload || _order == null) && PlyAsset != null && Material != null)
+            if ((_needsReload || _glesPosScale == null) && PlyAsset != null && Material != null)
                 TryLoad();
             
-            if (!enabled || _activeMaterial == null || _order == null || _count == 0) return;
+            if (!enabled || _activeMaterial == null || _glesPosScale == null || _count == 0) return;
             
             // Scene view handling - always draw
             if (camera.cameraType != CameraType.SceneView)
@@ -942,6 +985,9 @@ namespace GaussianSplatting
                 Debug.Log($"[GS-PERF] First render call! Camera={camera.name}, UseRenderFeature={UseRenderFeature}, cmd={(cmd != null ? "CommandBuffer" : "null")}");
             }
             
+            // Get or create per-camera state (each camera gets its own order buffer, sorter, and visible count)
+            var camState = GetOrCreateCameraState(camera);
+            
             // Track frame time
             float currentTime = Time.realtimeSinceStartup;
             float frameTime = (currentTime - _lastFrameTime) * 1000f;
@@ -957,6 +1003,7 @@ namespace GaussianSplatting
                 _sortStopwatch.Restart();
                 
                 // Apply mesh deformation BEFORE sorting (if enabled)
+                // Note: This modifies the shared position buffer, which is fine since all cameras see the same deformed mesh
                 if (_meshDeformer != null && _meshDeformer.IsInitialized)
                 {
                     _meshDeformer.ApplyDeformation(_glesPosScale, _glesRotation, _glesColor);
@@ -969,11 +1016,11 @@ namespace GaussianSplatting
                 if (SortingAlgorithm == SortAlgorithm.None)
                 {
                     // No sorting - use identity order (fastest, may have visual artifacts)
-                    _visibleCount = _count;
+                    camState.VisibleCount = _count;
                 }
-                else if (_gpuSorterBitonic != null)
+                else if (camState.BitonicSorter != null)
                 {
-                    // Bitonic sort path
+                    // Bitonic sort path (per-camera sorter)
                     Matrix4x4 sortModelMatrix = transform.localToWorldMatrix;
                     Matrix4x4 sortViewMatrix = camera.worldToCameraMatrix;
                     Matrix4x4 modelViewMatrix = sortViewMatrix * sortModelMatrix;
@@ -981,20 +1028,20 @@ namespace GaussianSplatting
                     if (EnableFrustumCulling)
                     {
                         Matrix4x4 viewProjMatrix = camera.projectionMatrix * sortViewMatrix * sortModelMatrix;
-                        if (_gpuSorterBitonic.Sort(_glesPosScale, _order, modelViewMatrix, viewProjMatrix, camPosOS, camDirOS, FrustumCullMargin, out int visible))
+                        if (camState.BitonicSorter.Sort(_glesPosScale, camState.OrderBuffer, modelViewMatrix, viewProjMatrix, camPosOS, camDirOS, FrustumCullMargin, out int visible))
                         {
-                            _visibleCount = visible;
+                            camState.VisibleCount = visible;
                         }
                     }
                     else
                     {
-                        _gpuSorterBitonic.Sort(_glesPosScale, _order, modelViewMatrix, camPosOS, camDirOS);
-                        _visibleCount = _count;
+                        camState.BitonicSorter.Sort(_glesPosScale, camState.OrderBuffer, modelViewMatrix, camPosOS, camDirOS);
+                        camState.VisibleCount = _count;
                     }
                 }
-                else if (_gpuSorterGLES != null)
+                else if (camState.GlesSorter != null)
                 {
-                    // Radix sort path
+                    // Radix sort path (per-camera sorter)
                     Matrix4x4 sortModelMatrix = transform.localToWorldMatrix;
                     Matrix4x4 sortViewMatrix = camera.worldToCameraMatrix;
                     Matrix4x4 modelViewMatrix = sortViewMatrix * sortModelMatrix;
@@ -1002,15 +1049,15 @@ namespace GaussianSplatting
                     if (EnableFrustumCulling)
                     {
                         Matrix4x4 viewProjMatrix = camera.projectionMatrix * sortViewMatrix * sortModelMatrix;
-                        if (_gpuSorterGLES.Sort(_glesPosScale, _order, modelViewMatrix, viewProjMatrix, camPosOS, camDirOS, FrustumCullMargin, out int visible))
+                        if (camState.GlesSorter.Sort(_glesPosScale, camState.OrderBuffer, modelViewMatrix, viewProjMatrix, camPosOS, camDirOS, FrustumCullMargin, out int visible))
                         {
-                            _visibleCount = visible;
+                            camState.VisibleCount = visible;
                         }
                     }
                     else
                     {
-                        _gpuSorterGLES.Sort(_glesPosScale, _order, modelViewMatrix, camPosOS, camDirOS);
-                        _visibleCount = _count;
+                        camState.GlesSorter.Sort(_glesPosScale, camState.OrderBuffer, modelViewMatrix, camPosOS, camDirOS);
+                        camState.VisibleCount = _count;
                     }
                 }
                 // No CPU fallback - if no GPU sorter, identity order is used
@@ -1018,6 +1065,13 @@ namespace GaussianSplatting
                 _sortStopwatch.Stop();
                 _lastSortTimeMs = (float)_sortStopwatch.Elapsed.TotalMilliseconds;
                 _avgSortTimeMs = Mathf.Lerp(_avgSortTimeMs, _lastSortTimeMs, 0.1f);
+            }
+            
+            // Safety check: ensure we have splats to draw
+            int visibleCount = camState.VisibleCount;
+            if (visibleCount <= 0)
+            {
+                visibleCount = _count;
             }
             
             // Performance logging (CommandBuffer path)
@@ -1028,8 +1082,8 @@ namespace GaussianSplatting
                 {
                     _perfLogCounter = 0;
                     float fps = _avgFrameTimeMs > 0 ? 1000f / _avgFrameTimeMs : 0;
-                    float cullPercent = _count > 0 ? (1f - (float)_visibleCount / _count) * 100f : 0;
-                    Debug.Log($"[GS-PERF] FPS: {fps:F1} | Frame: {_avgFrameTimeMs:F1}ms | Sort: {_avgSortTimeMs:F2}ms | Visible: {_visibleCount}/{_count} ({cullPercent:F0}% culled) | Vertices: {_visibleCount * 6}");
+                    float cullPercent = _count > 0 ? (1f - (float)visibleCount / _count) * 100f : 0;
+                    Debug.Log($"[GS-PERF] FPS: {fps:F1} | Frame: {_avgFrameTimeMs:F1}ms | Sort: {_avgSortTimeMs:F2}ms | Visible: {visibleCount}/{_count} ({cullPercent:F0}% culled) | Vertices: {visibleCount * 6}");
                 }
             }
 
@@ -1038,8 +1092,8 @@ namespace GaussianSplatting
             var viewportSize = new Vector4(w, h, 1f / Mathf.Max(1f, w), 1f / Mathf.Max(1f, h));
 
 
-            // Ensure buffers are bound (may be lost after scene save/reload)
-            _activeMaterial.SetBuffer("_SplatOrder", _order);
+            // Ensure buffers are bound - use per-camera order buffer
+            _activeMaterial.SetBuffer("_SplatOrder", camState.OrderBuffer);
             _activeMaterial.SetBuffer("_SplatPosCovA", _glesPosScale);
             _activeMaterial.SetBuffer("_SplatCovB", _glesRotation);
             _activeMaterial.SetBuffer("_SplatCovCColor", _glesColor);
@@ -1051,7 +1105,7 @@ namespace GaussianSplatting
                 _mpb.Clear();
                 _mpb.SetVector("_ViewportSize", viewportSize);
                 _mpb.SetFloat("_IsOrtho", camera.orthographic ? 1f : 0f);
-                _mpb.SetInt("_NumSplats", _visibleCount);
+                _mpb.SetInt("_NumSplats", visibleCount);
 
                 // Custom model matrices (UNITY_MATRIX_M can't be written in URP constant buffers)
                 _mpb.SetMatrix("_SplatObjectToWorld", transform.localToWorldMatrix);
@@ -1062,7 +1116,7 @@ namespace GaussianSplatting
                 // Immediate path (beginCameraRendering / built-in fallback)
                 _activeMaterial.SetVector("_ViewportSize", viewportSize);
                 _activeMaterial.SetFloat("_IsOrtho", camera.orthographic ? 1f : 0f);
-                _activeMaterial.SetInt("_NumSplats", _visibleCount);
+                _activeMaterial.SetInt("_NumSplats", visibleCount);
 
                 // Custom model matrices (UNITY_MATRIX_M can't be written in URP constant buffers)
                 _activeMaterial.SetMatrix("_SplatObjectToWorld", transform.localToWorldMatrix);
@@ -1079,18 +1133,18 @@ namespace GaussianSplatting
             if (cmd != null)
             {
                 // URP Render Feature path: use CommandBuffer for proper matrix setup
-                cmd.DrawProcedural(Matrix4x4.identity, _activeMaterial, 0, MeshTopology.Triangles, _visibleCount * 6, 1, _mpb);
+                cmd.DrawProcedural(Matrix4x4.identity, _activeMaterial, 0, MeshTopology.Triangles, visibleCount * 6, 1, _mpb);
             }
             else if (GraphicsSettings.currentRenderPipeline == null)
             {
                 // Built-in RP: DrawProceduralNow inside OnRenderObject is the most reliable path.
                 _activeMaterial.SetPass(0);
-                Graphics.DrawProceduralNow(MeshTopology.Triangles, _visibleCount * 6, 1);
+                Graphics.DrawProceduralNow(MeshTopology.Triangles, visibleCount * 6, 1);
             }
             else
             {
                 // SRP fallback (when not using render feature): bounds-based draw call
-                Graphics.DrawProcedural(_activeMaterial, bounds, MeshTopology.Triangles, _visibleCount * 6, 1, camera);
+                Graphics.DrawProcedural(_activeMaterial, bounds, MeshTopology.Triangles, visibleCount * 6, 1, camera);
             }
         }
 
@@ -1102,6 +1156,9 @@ namespace GaussianSplatting
                 _firstRenderLogged = true;
                 Debug.Log($"[GS-PERF] First render call (RasterCB)! Camera={camera.name}, UseRenderFeature={UseRenderFeature}");
             }
+            
+            // Get or create per-camera state (each camera gets its own order buffer, sorter, and visible count)
+            var camState = GetOrCreateCameraState(camera);
             
             // Track frame time for this path too
             float currentTime = Time.realtimeSinceStartup;
@@ -1116,6 +1173,7 @@ namespace GaussianSplatting
             if (shouldSort)
             {
                 // Apply mesh deformation BEFORE sorting (if enabled)
+                // Note: This modifies the shared position buffer, which is fine since all cameras see the same deformed mesh
                 if (_meshDeformer != null && _meshDeformer.IsInitialized)
                 {
                     _meshDeformer.ApplyDeformation(_glesPosScale, _glesRotation, _glesColor);
@@ -1128,11 +1186,11 @@ namespace GaussianSplatting
                 if (SortingAlgorithm == SortAlgorithm.None)
                 {
                     // No sorting - use identity order (fastest, may have visual artifacts)
-                    _visibleCount = _count;
+                    camState.VisibleCount = _count;
                 }
-                else if (_gpuSorterBitonic != null)
+                else if (camState.BitonicSorter != null)
                 {
-                    // Bitonic sort path
+                    // Bitonic sort path (per-camera sorter)
                     Matrix4x4 sortModelMatrix = transform.localToWorldMatrix;
                     Matrix4x4 sortViewMatrix = camera.worldToCameraMatrix;
                     Matrix4x4 modelViewMatrix = sortViewMatrix * sortModelMatrix;
@@ -1140,20 +1198,20 @@ namespace GaussianSplatting
                     if (EnableFrustumCulling)
                     {
                         Matrix4x4 viewProjMatrix = camera.projectionMatrix * sortViewMatrix * sortModelMatrix;
-                        if (_gpuSorterBitonic.Sort(_glesPosScale, _order, modelViewMatrix, viewProjMatrix, camPosOS, camDirOS, FrustumCullMargin, out int visible))
+                        if (camState.BitonicSorter.Sort(_glesPosScale, camState.OrderBuffer, modelViewMatrix, viewProjMatrix, camPosOS, camDirOS, FrustumCullMargin, out int visible))
                         {
-                            _visibleCount = visible;
+                            camState.VisibleCount = visible;
                         }
                     }
                     else
                     {
-                        _gpuSorterBitonic.Sort(_glesPosScale, _order, modelViewMatrix, camPosOS, camDirOS);
-                        _visibleCount = _count;
+                        camState.BitonicSorter.Sort(_glesPosScale, camState.OrderBuffer, modelViewMatrix, camPosOS, camDirOS);
+                        camState.VisibleCount = _count;
                     }
                 }
-                else if (_gpuSorterGLES != null)
+                else if (camState.GlesSorter != null)
                 {
-                    // Radix sort path
+                    // Radix sort path (per-camera sorter)
                     Matrix4x4 sortModelMatrix = transform.localToWorldMatrix;
                     Matrix4x4 sortViewMatrix = camera.worldToCameraMatrix;
                     Matrix4x4 modelViewMatrix = sortViewMatrix * sortModelMatrix;
@@ -1161,18 +1219,25 @@ namespace GaussianSplatting
                     if (EnableFrustumCulling)
                     {
                         Matrix4x4 viewProjMatrix = camera.projectionMatrix * sortViewMatrix * sortModelMatrix;
-                        if (_gpuSorterGLES.Sort(_glesPosScale, _order, modelViewMatrix, viewProjMatrix, camPosOS, camDirOS, FrustumCullMargin, out int visible))
+                        if (camState.GlesSorter.Sort(_glesPosScale, camState.OrderBuffer, modelViewMatrix, viewProjMatrix, camPosOS, camDirOS, FrustumCullMargin, out int visible))
                         {
-                            _visibleCount = visible;
+                            camState.VisibleCount = visible;
                         }
                     }
                     else
                     {
-                        _gpuSorterGLES.Sort(_glesPosScale, _order, modelViewMatrix, camPosOS, camDirOS);
-                        _visibleCount = _count;
+                        camState.GlesSorter.Sort(_glesPosScale, camState.OrderBuffer, modelViewMatrix, camPosOS, camDirOS);
+                        camState.VisibleCount = _count;
                     }
                 }
                 // No CPU fallback - if no GPU sorter, identity order is used
+            }
+
+            // Safety check: ensure we have splats to draw
+            int visibleCount = camState.VisibleCount;
+            if (visibleCount <= 0)
+            {
+                visibleCount = _count;
             }
 
             float w = camera.pixelWidth;
@@ -1182,7 +1247,7 @@ namespace GaussianSplatting
 
             // RasterCommandBuffer path (RenderGraph): use MPB so per-object/per-camera data is captured per draw.
             // Note: Buffers must be set on Material (not MaterialPropertyBlock) as MPB doesn't support buffers
-            _activeMaterial.SetBuffer("_SplatOrder", _order);
+            _activeMaterial.SetBuffer("_SplatOrder", camState.OrderBuffer);
             _activeMaterial.SetBuffer("_SplatPosCovA", _glesPosScale);
             _activeMaterial.SetBuffer("_SplatCovB", _glesRotation);
             _activeMaterial.SetBuffer("_SplatCovCColor", _glesColor);
@@ -1190,7 +1255,7 @@ namespace GaussianSplatting
             _mpb.Clear();
             _mpb.SetVector("_ViewportSize", viewportSize);
             _mpb.SetFloat("_IsOrtho", camera.orthographic ? 1f : 0f);
-            _mpb.SetInt("_NumSplats", _visibleCount);
+            _mpb.SetInt("_NumSplats", visibleCount);
             _mpb.SetMatrix("_SplatObjectToWorld", transform.localToWorldMatrix);
             _mpb.SetMatrix("_SplatWorldToObject", transform.worldToLocalMatrix);
 
@@ -1204,7 +1269,7 @@ namespace GaussianSplatting
             _mpb.SetFloat("_CamProjM11", projMatrix[1, 1]);
 
             // Draw (URP/RenderGraph) - buffers are set on Material, other properties in MPB
-            cmd.DrawProcedural(Matrix4x4.identity, _activeMaterial, 0, MeshTopology.Triangles, _visibleCount * 6, 1, _mpb);
+            cmd.DrawProcedural(Matrix4x4.identity, _activeMaterial, 0, MeshTopology.Triangles, visibleCount * 6, 1, _mpb);
             
             // Performance logging (shared with CommandBuffer path)
             if (LogPerformanceEveryNFrames > 0)
@@ -1214,8 +1279,8 @@ namespace GaussianSplatting
                 {
                     _perfLogCounter = 0;
                     float fps = _avgFrameTimeMs > 0 ? 1000f / _avgFrameTimeMs : 0;
-                    float cullPercent = _count > 0 ? (1f - (float)_visibleCount / _count) * 100f : 0;
-                    Debug.Log($"[GS-PERF] FPS: {fps:F1} | Frame: {_avgFrameTimeMs:F1}ms | Visible: {_visibleCount}/{_count} ({cullPercent:F0}% culled) | Vertices: {_visibleCount * 6}");
+                    float cullPercent = _count > 0 ? (1f - (float)visibleCount / _count) * 100f : 0;
+                    Debug.Log($"[GS-PERF] FPS: {fps:F1} | Frame: {_avgFrameTimeMs:F1}ms | Visible: {visibleCount}/{_count} ({cullPercent:F0}% culled) | Vertices: {visibleCount * 6}");
                 }
             }
         }
@@ -1268,99 +1333,6 @@ namespace GaussianSplatting
                 Mathf.Abs(axisX.z) + Mathf.Abs(axisY.z) + Mathf.Abs(axisZ.z)
             );
             return new Bounds(center, worldExt * 2f);
-        }
-
-        /// <summary>
-        /// Sort order is back-to-front along camera direction, and computes a visible count that excludes splats behind the camera.
-        /// This is a C# port of the core approach in `gsplat/gsplat-sort-worker.js`.
-        /// </summary>
-        private void SortBackToFront(Vector3 camPosOS, Vector3 camDirOS)
-        {
-            int n = _count;
-            if (_distances.Length != n) _distances = new uint[n];
-
-            // Calculate a min/max range using center projection only (no chunk optimization here).
-            // We use dot(center, dir) as distance along view direction (in object space).
-            float minDist = float.PositiveInfinity;
-            float maxDist = float.NegativeInfinity;
-            for (int i = 0; i < n; i++)
-            {
-                var c = _centersCpu[i];
-                float d = c.x * camDirOS.x + c.y * camDirOS.y + c.z * camDirOS.z;
-                if (d < minDist) minDist = d;
-                if (d > maxDist) maxDist = d;
-            }
-
-            // bits in worker: clamp 10..20 based on N
-            int compareBits = Mathf.Clamp(Mathf.RoundToInt(Mathf.Log(Mathf.Max(1, n / 4), 2f)), 10, 20);
-            int bucketCount = (1 << compareBits) + 1;
-
-            if (_countBuffer.Length != bucketCount) _countBuffer = new uint[bucketCount];
-            else Array.Clear(_countBuffer, 0, _countBuffer.Length);
-
-            float range = maxDist - minDist;
-            if (range < 1e-6f)
-            {
-                for (int i = 0; i < n; i++)
-                {
-                    _distances[i] = 0;
-                    _countBuffer[0]++;
-                }
-            }
-            else
-            {
-                float invRange = 1f / range;
-                for (int i = 0; i < n; i++)
-                {
-                    var c = _centersCpu[i];
-                    float d = (c.x * camDirOS.x + c.y * camDirOS.y + c.z * camDirOS.z - minDist) * invRange;
-                    uint key = (uint)Mathf.Clamp((int)(d * (bucketCount - 1)), 0, bucketCount - 1);
-                    _distances[i] = key;
-                    _countBuffer[key]++;
-                }
-            }
-
-            // prefix sum
-            for (int i = 1; i < bucketCount; i++)
-                _countBuffer[i] += _countBuffer[i - 1];
-
-            // counting sort into _orderCpu: REVERSE order - far splats first (index 0), near splats last
-            // Back-to-front: far splats drawn first, near splats drawn last (painter's algorithm)
-            for (int i = 0; i < n; i++)
-            {
-                uint key = _distances[i];
-                int destIndex = n - 1 - (int)(--_countBuffer[key]);
-                _orderCpu[destIndex] = (uint)i;
-            }
-
-            // visible count: exclude behind camera plane using cam position
-            float cameraDist = camPosOS.x * camDirOS.x + camPosOS.y * camDirOS.y + camPosOS.z * camDirOS.z;
-
-            float DistAtOrderIndex(int orderIndex)
-            {
-                var c = _centersCpu[_orderCpu[orderIndex]];
-                return c.x * camDirOS.x + c.y * camDirOS.y + c.z * camDirOS.z - cameraDist;
-            }
-
-            // Find last splat with dist >= 0 (in front) using binary search on the sorted order
-            // Our order is far..near (DECREASING), so dist decreases. Behind-camera splats (dist < 0) are at the end.
-            int lo = 0, hi = n - 1, lastNonNeg = -1;
-            while (lo <= hi)
-            {
-                int mid = (lo + hi) >> 1;
-                if (DistAtOrderIndex(mid) >= 0f)
-                {
-                    lastNonNeg = mid;
-                    lo = mid + 1;  // search right half for later valid index
-                }
-                else
-                {
-                    hi = mid - 1;  // search left half
-                }
-            }
-
-            // We draw [0..lastNonNeg], so visibleCount = lastNonNeg + 1
-            _visibleCount = Mathf.Clamp(lastNonNeg + 1, 0, n);
         }
 
         // ISerializationCallbackReceiver implementation

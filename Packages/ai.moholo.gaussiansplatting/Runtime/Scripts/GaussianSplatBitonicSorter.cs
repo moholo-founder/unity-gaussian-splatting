@@ -80,7 +80,8 @@ namespace GaussianSplatting
                         Matrix4x4 viewProjMatrix, Vector3 camPosOS, Vector3 camDirOS, 
                         float frustumCullMargin, out int visibleCount)
         {
-            visibleCount = _lastVisibleCount;
+            // Always return a valid visible count (use full count if async readback hasn't completed yet)
+            visibleCount = _lastVisibleCount > 0 ? _lastVisibleCount : _splatCount;
             
             // Skip if camera hasn't moved
             if (Mathf.Abs(camPosOS.x - _lastCamPos.x) < Epsilon &&

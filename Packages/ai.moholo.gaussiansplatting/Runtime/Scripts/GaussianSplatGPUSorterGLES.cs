@@ -90,7 +90,8 @@ namespace GaussianSplatting
         /// </summary>
         public bool Sort(GraphicsBuffer posBuffer, GraphicsBuffer orderBuffer, Matrix4x4 viewMatrix, Matrix4x4 viewProjMatrix, Vector3 camPosOS, Vector3 camDirOS, float frustumCullMargin, out int visibleCount)
         {
-            visibleCount = _splatCount;  // Default to all visible
+            // Always return a valid visible count (use full count if async readback hasn't completed yet or returned 0)
+            visibleCount = _lastVisibleCount > 0 ? _lastVisibleCount : _splatCount;
             
             // Skip if camera hasn't moved
             if (Mathf.Abs(camPosOS.x - _lastCamPos.x) < Epsilon &&
